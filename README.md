@@ -1,0 +1,117 @@
+# EchoSense
+
+An interactive room scan viewer for the EchoSense headset project. The UI
+starts with **Mock data**, a modeled living room and simulated sensor readings.
+
+## Run locally
+
+Use Node.js 20 or later.
+
+```sh
+node serve.js
+```
+
+Open `http://127.0.0.1:4173/` in a WebGL-capable browser. There are no packages
+to install. Stop the static development server with Ctrl+C.
+
+## Viewer controls
+
+- **Orbit / Camera / Top** switch between a cutaway, eye-height view, and
+  overhead view. Drag to orbit, Shift-drag or right-drag to pan, and scroll
+  to zoom. In Top view, dragging pans. On a touchscreen, pinch to zoom.
+- With the canvas focused, use arrow keys to rotate, Shift + arrows to pan,
+  + and − to zoom, and 0 to reset the current view.
+- **Render mode** switches between cyan points, natural-color points, and
+  triangular wireframe. The wireframe has cyan, ice, and height-based tints.
+- **Max vertices** caps the rendered points or line vertices. **Point size**
+  adjusts points only. **Frame skip** skips geometry uploads in socket mode
+  while retaining telemetry, and slows mock telemetry refresh in preview mode.
+- **Grid** draws a one-meter coordinate grid. **RF rings** shows three
+  simulated anchors and their coverage rings. The amber outline shows the
+  estimated zone when the source supplies an estimate above the UI threshold.
+- **Height slice** shows a 44 cm band centered at the selected height.
+  **Estimate trail** shows recent confident estimates and leaves gaps when
+  the estimate was missing. **Camera** adds a heading and overhead map.
+
+## Saved Maps
+
+Open **Saved Maps** to find two labeled mock scans of the same room. The
+second pass includes returns that the first missed near the chair and
+bookcase. Select both thumbnails' **Compare** checkboxes and choose
+**Compare** to open the synchronized cameras. **Change overlay** uses
+0.25 m cells to highlight returns in the later scan that have no matching
+cell in the earlier scan. Gray returns do not establish that a surface was
+removed or that an unobserved area was clear. The overlay is available only
+for scans with a shared coordinate frame. The current socket decoder has
+no alignment metadata, so live captures can be viewed side by side with the
+overlay disabled.
+
+Use **Save snapshot** in the scanner to capture the current geometry,
+telemetry and thumbnail. The library supports renaming, deleting, and
+filtering by name or data source. Selecting a thumbnail reopens that map
+in the scanner. Use **Replay** or scrub the timeline to see the stored
+frames and estimate gaps. The two demo maps show a synthetic scan build;
+new snapshots retain the most recent 12 one-second samples plus the
+capture frame. A snapshot with just one frame still opens in the viewer.
+
+The archive uses IndexedDB in this browser, scoped to the address and port.
+Reloading the same URL keeps the maps. Clearing this site's browser data
+removes them. Maps are not synced or uploaded. The scanner on the Scan
+tab keeps receiving socket messages while a saved map is open.
+
+## Geometry and reference choices
+
+The references use several rendering styles and show different interiors. The
+default scene follows the cyan living-room cutaway: two exposed walls, a
+doorway on the left, framed picture and three-seat couch, low open-shelf table
+in front, window on the right, then an armchair and bookcase. The eye-height
+wireframe uses triangulated surfaces, with a partial ceiling and bright
+edges. Natural color and RF/grid layers come from the corresponding reference
+images. The compact upper-right controls follow the point-cloud viewer panel.
+
+The images provide no scale or measured scan. The model assumes an
+8.6 × 6.4 × 3.15 m room and uses Y-up coordinates in meters. Furniture is
+modeled from visible silhouettes and relationships, with rounded cushions,
+shelves, individual books, and a lamp. Front and left walls are open for the
+cutaway. The wireframe and points are generated from surfaces at startup.
+
+## Backend handoff
+
+`src/feed.js` owns the connection lifecycle. `openFeed(url, options)` receives
+an injected `decode(payload)` function plus `onFrame`, `onStatus` and optional
+`onInvalid` callbacks. It returns a disconnect function. The viewer consumes
+geometry and settings and has no WebSocket dependency. The demo uses only a
+static HTTP server. No backend code or WebSocket server ships with this UI.
+
+No established wire contract was present in this checkout. The Connect
+control currently uses a **preview decoder** for experimentation. Once the
+backend format is agreed, replace the `decodePreview` callback in
+`src/main.js` with a decoder for that format. Normalize units and axes there.
+The UI expects a partial snapshot with optional `points` (flat XYZ
+`Float32Array`), `frame` (integer), `latencyMs` (number), and `target`
+(`{ position: [x,y,z], confidence }` with confidence 0–1, or `null` to clear).
+An omitted field retains its last value. A zero-length point array clears
+geometry. Mesh and RF anchors are derived from the sample scene and are
+available in mock mode.
+
+For a quick test, the placeholder decoder accepts JSON such as the following.
+This is an example fixture, not a proposed requirement for the server.
+
+```json
+{"frame":7,"latencyMs":22,"points":[[0,0,0],[1,1,1]],"target":{"position":[0,0,0],"confidence":0.71}}
+```
+
+## Verify
+
+```sh
+node --test
+```
+
+The tests cover preview payload conversion, malformed or oversized points,
+decoder injection and disconnect, replay sample selection, and cell-based
+change detection. For visual verification, load the page
+and switch between all three camera and render modes. Change the vertex cap
+and point size, enable Grid and RF rings, and try orbit, pan, and zoom.
+At a phone width the controls start collapsed and can be opened above the
+viewport. The browser check used a local WebSocket fixture to verify geometry
+replacement, telemetry, invalid message handling and disconnect recovery.
