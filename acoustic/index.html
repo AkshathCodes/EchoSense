@@ -69,7 +69,7 @@
     </section>
     <details class="capture">
       <summary>Capture a scan</summary>
-      <p>Use the laptop’s speaker and microphone. Mark a room origin, then enter where the scanner is and where it’s pointed. Heading 0° is forward, 90° is right, and positive tilt points up.</p>
+      <p>Mark a room origin, then enter where the scanner is and where it’s pointed. Heading 0° is forward, 90° is right, and positive tilt points up.</p>
       <form id="scan-form">
         <label for="scene-name">Scene
           <input id="scene-name" name="scene" required maxlength="40" placeholder="Panel A">
@@ -96,11 +96,18 @@
           <input id="reference" name="reference" type="number" min="0" max="10" step="0.01" inputmode="decimal" placeholder="1.00">
         </label>
         <div class="toolbar">
-          <button id="scan" type="submit">Record 5 trials</button>
+          <button id="scan" type="submit">Record 5 laptop chirps</button>
           <button id="download" type="button" disabled>Download scan CSV</button>
           <button id="download-map" type="button" disabled>Download room map</button>
           <button id="download-audio" type="button" disabled>Save last audio</button>
         </div>
+        <details class="sensor-entry">
+          <summary>Enter ultrasonic sensor readings</summary>
+          <label for="ranges">Five measured ranges in meters, one per line. Use <code>timeout</code> for a missed return.
+            <textarea id="ranges" rows="5" maxlength="100" spellcheck="false"></textarea>
+          </label>
+          <button id="add-ranges" type="button">Add sensor readings</button>
+        </details>
       </form>
       <p id="capture-message" class="message" role="status"></p>
     </details>

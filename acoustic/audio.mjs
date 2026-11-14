@@ -2,6 +2,7 @@ export const speedOfSound = 343;
 export const pulseSeconds = 0.003;
 export const pulseSpacing = 0.38;
 export const trialCount = 5;
+export const directSearchSeconds = 0.28;
 const minimumRange = 0.65;
 const maximumRange = 4.5;
 
@@ -40,7 +41,7 @@ function largestIndex(samples, start, end) {
 export function analyzePulse(recording, sampleRate, emittedAt) {
   const chirp = makeChirp(sampleRate);
   const start = emittedAt - Math.round(sampleRate * 0.01);
-  const directWindow = Math.round(sampleRate * 0.17);
+  const directWindow = Math.round(sampleRate * directSearchSeconds);
   const searchNear = Math.ceil(2 * minimumRange * sampleRate / speedOfSound);
   const searchFar = Math.floor(2 * maximumRange * sampleRate / speedOfSound);
   const corr = correlations(recording, chirp, start, start + directWindow + searchFar, 4);

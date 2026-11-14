@@ -1,5 +1,23 @@
+import { trialCount } from "./audio.mjs";
+
 function nonnegative(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+export function parseRangeTrials(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length !== trialCount) {
+    throw new RangeError(`Enter ${trialCount} readings, one per line in meters. Use timeout for a missed return.`);
+  }
+  return lines.map((line, index) => {
+    const value = line.trim();
+    if (value === "timeout") return { status: "no_echo", range_m: null, echo_ratio: null };
+    const range = Number(value);
+    if (!/^\d*\.?\d+$/.test(value) || !inRange(range, 0.001, 50)) {
+      throw new RangeError(`Reading ${index + 1} must be a distance from 0.001 to 50 m or timeout.`);
+    }
+    return { status: "ok", range_m: range, echo_ratio: null };
+  });
 }
 
 export function validateReport(report) {

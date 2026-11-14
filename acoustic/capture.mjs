@@ -1,4 +1,4 @@
-import { analyzePulse, makeChirp, pulseSpacing, trialCount } from "./audio.mjs";
+import { analyzePulse, directSearchSeconds, makeChirp, pulseSpacing, trialCount } from "./audio.mjs";
 
 export async function openRecorder() {
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -31,7 +31,7 @@ export async function captureTrials({ context, worklet }) {
   const step = Math.round(pulseSpacing * rate);
   const padding = Math.round(0.08 * rate);
   const start = first - padding;
-  const end = first + (trialCount - 1) * step + Math.round(0.24 * rate);
+  const end = first + (trialCount - 1) * step + Math.round((directSearchSeconds + 0.05) * rate);
   const recording = new Float32Array(end - start);
   const populated = new Uint8Array(recording.length);
   const original = makeChirp(rate);

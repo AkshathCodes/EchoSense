@@ -1,5 +1,5 @@
 import { captureTrials, openRecorder, toWave } from "./capture.mjs";
-import { buildRoom, previewReport, scanKey, stationPose, validateReport } from "./map.mjs";
+import { buildRoom, parseRangeTrials, previewReport, scanKey, stationPose, validateReport } from "./map.mjs";
 import { drawRoom, initialView } from "./room-view.mjs";
 
 const byId = (id) => document.getElementById(id);
@@ -16,6 +16,8 @@ const elements = {
   published: byId("load-published"),
   form: byId("scan-form"),
   scan: byId("scan"),
+  addRanges: byId("add-ranges"),
+  ranges: byId("ranges"),
   download: byId("download"),
   downloadAudio: byId("download-audio"),
   captureMessage: byId("capture-message"),
@@ -209,40 +211,53 @@ function addTrials(pose, results) {
     source: "measured", ...pose, trial: index + 1, ...result,
   }));
   capturedTrials = [...capturedTrials.filter((row) => scanKey(row) !== key), ...rows];
+  showReport(previewReport(capturedTrials), pose.scene);
+  elements.download.disabled = false;
+  elements.downloadMap.disabled = false;
+  const accepted = results.filter((result) => result.status === "ok");
+  const distances = accepted.map((result) => `${result.range_m.toFixed(2)} m`).join(", ");
+  const statuses = results.filter((result) => result.status !== "ok")
+    .map((result) => result.status.replaceAll("_", " ")).join(", ");
+  elements.captureMessage.textContent = `${accepted.length}/${results.length} usable` +
+    (distances ? ` (${distances})` : "") + (statuses ? `. Rejected: ${statuses}.` : ".");
 }
+
+function readScanPose() {
+  const fields = new FormData(elements.form);
+  const scene = String(fields.get("scene")).trim();
+  if (!scene) throw new TypeError("Give the scene a name.");
+  const reference = fields.get("reference") === "" ? null : Number(fields.get("reference"));
+  return { scene, station_m: Number(fields.get("station")), depth_m: Number(fields.get("depth")),
+    height_m: Number(fields.get("height")), heading_deg: Number(fields.get("heading")) % 360,
+    pitch_deg: Number(fields.get("pitch")), surface: String(fields.get("surface")).trim(), reference_m: reference };
+}
+
+elements.addRanges.addEventListener("click", () => {
+  if (elements.scan.disabled || !elements.form.reportValidity()) return;
+  elements.captureMessage.classList.remove("error");
+  try {
+    addTrials(readScanPose(), parseRangeTrials(elements.ranges.value));
+    elements.ranges.value = "";
+  } catch (error) {
+    showError(elements.captureMessage, error);
+  }
+});
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (elements.scan.disabled) return;
-  const fields = new FormData(elements.form);
-  const scene = String(fields.get("scene")).trim();
-  const reference = fields.get("reference") === "" ? null : Number(fields.get("reference"));
-  const pose = { scene, station_m: Number(fields.get("station")), depth_m: Number(fields.get("depth")),
-    height_m: Number(fields.get("height")), heading_deg: Number(fields.get("heading")) % 360,
-    pitch_deg: Number(fields.get("pitch")), surface: String(fields.get("surface")).trim(), reference_m: reference };
-  if (!scene) {
-    showError(elements.captureMessage, new Error("Give the scene a name."));
-    return;
-  }
   elements.scan.disabled = true;
+  elements.addRanges.disabled = true;
   elements.captureMessage.classList.remove("error");
   elements.captureMessage.textContent = "Keep the scanner still during the five chirps.";
   let recorder;
   try {
+    const pose = readScanPose();
     recorder = await openRecorder();
     const { results, recording, rate } = await captureTrials(recorder);
     latestAudio = toWave(recording, rate);
     addTrials(pose, results);
-    showReport(previewReport(capturedTrials), scene);
-    const accepted = results.filter((result) => result.status === "ok");
-    const distances = accepted.map((result) => `${result.range_m.toFixed(2)} m`).join(", ");
-    const statuses = results.filter((result) => result.status !== "ok")
-      .map((result) => result.status.replaceAll("_", " ")).join(", ");
-    elements.captureMessage.textContent = `${accepted.length}/${results.length} usable` +
-      (distances ? ` (${distances})` : "") + (statuses ? `. Rejected: ${statuses}.` : ".");
-    elements.download.disabled = false;
     elements.downloadAudio.disabled = false;
-    elements.downloadMap.disabled = false;
   } catch (error) {
     showError(elements.captureMessage, error);
   } finally {
@@ -251,6 +266,7 @@ elements.form.addEventListener("submit", async (event) => {
       await recorder.context.close();
     }
     elements.scan.disabled = false;
+    elements.addRanges.disabled = false;
   }
 });
 
