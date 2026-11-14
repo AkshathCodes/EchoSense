@@ -139,6 +139,20 @@ The same aggregation can run locally with Python 3.10 or later.
 python acoustic/aggregate.py acoustic/sample-scans.csv acoustic/room-map.json
 ```
 
+## Sonar ML (`sonar-ml/`)
+
+Sonar simulation, 3D mapping, segmentation and object classification (wall,
+doorway, furniture, debris, person) in Python. It currently runs on simulated
+40 kHz sonar data and writes a detections JSON. Start with
+[`sonar-ml/README.md`](sonar-ml/README.md) and
+[`sonar-ml/AGENTS.md`](sonar-ml/AGENTS.md). Run its commands from `sonar-ml/`:
+
+```sh
+cd sonar-ml
+python3 -m venv .venv && .venv/bin/pip install -e "perception[dev]"
+cd perception && ../.venv/bin/python -m pytest
+```
+
 ## Verify
 
 ```sh
