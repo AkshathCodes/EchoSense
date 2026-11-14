@@ -1,5 +1,6 @@
 import { comparable, compareReturns } from './archive.js';
 import { createViewer } from './viewer.js';
+import { sonarLabel } from './sonar.js';
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const format = new Intl.NumberFormat('en-US');
@@ -57,7 +58,7 @@ export function createLibrary({ show, open, scan }) {
     const thumb = node('img');
     thumb.src = map.thumb;
     thumb.alt = '';
-    const badge = node('span', map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
+    const badge = node('span', map.sonar ? sonarLabel(map.sonar) : map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
     badge.dataset.source = map.source;
     preview.append(thumb, badge);
     const info = node('div', '', 'map-info');
@@ -171,6 +172,12 @@ function mountComparison([first, second]) {
   el('first-map').textContent = first.name;
   el('second-map').textContent = second.name;
   const viewers = [];
+  let fitPoints;
+  if (!aligned && (first.sonar || second.sonar)) {
+    fitPoints = new Float32Array(first.points.length + second.points.length);
+    fitPoints.set(first.points);
+    fitPoints.set(second.points, first.points.length);
+  }
   let animation;
   function dispose() {
     cancelAnimationFrame(animation);
@@ -190,6 +197,7 @@ function mountComparison([first, second]) {
       viewers[i].replaceCloud(map.points);
     }
     if (aligned) viewers[1].replaceChanges(diff);
+    if (fitPoints) viewers[0].frameCloud(fitPoints);
   } catch (error) {
     dispose();
     throw error;
@@ -202,7 +210,10 @@ function mountComparison([first, second]) {
         : 'Earlier capture on the left. Drag either map to move both cameras.';
   }
   changeToggle.onchange = describe;
-  reset.onclick = () => viewers[0].preset('orbit');
+  reset.onclick = () => {
+    viewers[0].preset('orbit');
+    if (fitPoints) viewers[0].frameCloud(fitPoints);
+  };
   describe();
   function draw() {
     for (const viewer of viewers) viewer.draw({ mode: 'points', pointSize: 10,

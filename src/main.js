@@ -1,7 +1,8 @@
 import { buildRoom, anchors } from './room.js';
 import { createViewer } from './viewer.js';
 import { mockFrame } from './mock.js';
-import { decodePreview, openFeed } from './feed.js';
+import { openFeed } from './feed.js';
+import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
 import { sampleScans, MOCK_SPACE } from './samples.js';
 import { createLibrary } from './library.js';
@@ -13,6 +14,7 @@ const mode = el('render-mode'), pointSize = el('point-size'), pointCap = el('max
 const skip = el('frame-skip'), grid = el('grid'), rings = el('rings');
 const connection = el('connection-state'), note = el('connection-note'), source = el('source');
 const address = el('address'), connect = el('connect');
+address.value = SONAR_URL;
 const marker = el('target-marker'), loading = el('loading');
 const labels = anchors.map((_, i) => {
   const label = document.createElement('span');
@@ -30,7 +32,9 @@ let latest = {}, pendingCloud, frameNumber = 0, lastTick = -1, lastTelemetry = -
 let userChangedPanel = false;
 const replay = createReplay();
 let workspace = 'scan', savedMap, livePoints, currentPoints, demoPoints, latestTargetAt, scanSettings;
-let activeSample, renderOptions, lastHud = -1, sliceBounds = [0, 3.2];
+let activeSample, renderOptions, lastHud = -1, sliceBounds = [0, 3.2], frameSonar = false;
+let scanCameraBeforeSonar;
+let sonarReplayComplete = false, skippedSonar;
 const emptyPoints = new Float32Array();
 const unsetPoints = Symbol('reset geometry');
 const history = [];
@@ -77,13 +81,14 @@ function openSaved(map) {
   };
   savedMap = map;
   currentPoints = unsetPoints;
+  activeSavedMap = undefined;
   replay.open(map);
   el('replay').hidden = false;
   el('scan-capture').hidden = true;
   el('connection-form').hidden = true;
   el('connection-note').hidden = true;
   updateModeAvailability();
-  writeSource(map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
+  writeSource(map.sonar ? `Saved · ${sonarLabel(map.sonar)}` : map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
   source.removeAttribute('data-live');
   set('study', map.name);
   show('scan');
@@ -108,9 +113,7 @@ function returnToScan() {
     configureSlice(live ? livePoints ?? emptyPoints : demoPoints);
     el('slice-height').value = scanSettings.slice;
     updateSliceLabel();
-    source.toggleAttribute('data-live', live);
-    writeSource(live ? 'Socket data' : 'Mock data');
-    set('study', live ? 'Incoming room scan' : 'Living room / sample scan');
+    showScanSource();
   }
   show('scan');
 }
@@ -156,41 +159,79 @@ function updateViewLabel() {
   for (const button of views) button.setAttribute('aria-pressed', String(button.dataset.view === view));
   set('view-label', viewLabels[view]);
 }
+function resetScanCamera() {
+  viewer?.preset(view);
+  if ((savedMap?.sonar || !savedMap && latest.sonar) && currentPoints instanceof Float32Array) {
+    viewer.frameCloud(currentPoints);
+  }
+}
 for (const button of views) button.addEventListener('click', () => {
   view = button.dataset.view;
-  viewer?.preset(view);
+  resetScanCamera();
   updateViewLabel();
 });
 el('zoom-in').addEventListener('click', () => viewer?.zoom(0.82));
 el('zoom-out').addEventListener('click', () => viewer?.zoom(1.22));
-el('reset-view').addEventListener('click', () => viewer?.preset(view));
+el('reset-view').addEventListener('click', resetScanCamera);
 
 function writeSource(label) {
+  if (source.textContent === label) return;
   source.replaceChildren(document.createElement('i'), document.createTextNode(label));
 }
 
-function applyFrame(frame) {
-  // Metadata is always current. The render cap only applies to geometry uploads.
+function showScanSource() {
+  const sonar = latest.sonar;
+  source.toggleAttribute('data-live', live && sonar?.acquisition !== 'simulated');
+  writeSource(!live ? 'Mock data' : sonar ? sonarLabel(sonar) : 'Socket data');
+  set('study', !live ? 'Living room / sample scan'
+    : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
+}
+
+function applyFrame(frame, force = false) {
   const { points, ...telemetry } = frame;
+  const usePoints = points && (force || !points.length || frameNumber++ % (Number(skip.value) + 1) === 0);
+  // A sonar detection is relative to its own frame. Skip the whole frame together.
+  if (frame.sonar && !usePoints) {
+    skippedSonar = frame;
+    return;
+  }
+  skippedSonar = undefined;
   latest = { ...latest, ...telemetry };
   if (Object.hasOwn(frame, 'target')) latestTargetAt = performance.now();
-  if (points && (!points.length || frameNumber++ % (Number(skip.value) + 1) === 0)) pendingCloud = points;
+  if (usePoints) pendingCloud = points;
 }
 
 function status(state) {
   const messages = {
-    connecting: ['Connecting…', 'Opening the WebSocket. Mock scan remains visible.'],
-    connected: ['Connected', 'Waiting for a preview frame.'],
-    error: ['Connection failed', 'Check the URL and confirm the WebSocket server is running.'],
-    disconnected: ['Local preview', 'Uses the preview decoder.'],
+    connecting: ['Connecting…', 'Opening the WebSocket.'],
+    connected: ['Connected', 'Waiting for a sonar frame.'],
+    error: ['Connection failed', 'Check the bridge URL, server, and allowed browser origin.'],
+    complete: ['Replay complete', 'Showing the last recorded frame. Connect to replay again.'],
+    disconnected: ['Local preview', 'Start the sonar bridge, then connect.'],
   };
   connection.dataset.status = state;
   [connection.textContent, note.textContent] = messages[state];
   const busy = state === 'connected' || state === 'connecting';
   connect.textContent = busy ? 'Disconnect' : 'Connect';
   address.disabled = busy;
-  if (!busy) {
-    disconnect = undefined;
+  if (!busy) disconnect = undefined;
+  if (state === 'complete') {
+    if (skippedSonar) applyFrame(skippedSonar, true);
+    sonarReplayComplete = true;
+  }
+  if (!busy && state !== 'complete') {
+    if (scanCameraBeforeSonar) {
+      if (savedMap) scanSettings.camera = scanCameraBeforeSonar;
+      else {
+        view = scanCameraBeforeSonar.view;
+        viewer?.follow(scanCameraBeforeSonar.state, view);
+        updateViewLabel();
+      }
+    }
+    scanCameraBeforeSonar = undefined;
+    sonarReplayComplete = false;
+    skippedSonar = undefined;
+    frameSonar = false;
     live = false;
     pendingCloud = undefined;
     latest = {};
@@ -198,11 +239,7 @@ function status(state) {
     latestTargetAt = undefined;
     livePoints = undefined;
     history.length = 0;
-    if (!savedMap) {
-      source.removeAttribute('data-live');
-      writeSource('Mock data');
-      set('study', 'Living room / sample scan');
-    }
+    if (!savedMap) showScanSource();
     updateModeAvailability();
   }
 }
@@ -214,26 +251,31 @@ el('connection-form').addEventListener('submit', event => {
     return;
   }
   try {
+    let firstFrame = true;
     disconnect = openFeed(address.value.trim(), {
-      decode: decodePreview,
+      decode: decodeSocketFrame,
       onStatus: status,
-      onInvalid: () => { note.textContent = 'Message skipped. Expected preview JSON.'; },
+      onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
-        if (!live) {
+        if (firstFrame) {
+          firstFrame = false;
+          scanCameraBeforeSonar ??= savedMap ? scanSettings.camera : viewer?.camera();
           live = true;
+          sonarReplayComplete = false;
+          skippedSonar = undefined;
           latest = {};
+          latestTargetAt = undefined;
+          pendingCloud = undefined;
           frameNumber = 0;
           history.length = 0;
           livePoints = emptyPoints;
           updateModeAvailability();
-          if (!savedMap) {
-            source.setAttribute('data-live', '');
-            writeSource('Socket data');
-            set('study', 'Incoming room scan');
-          }
         }
+        frameSonar ||= Boolean(frame.sonar && !livePoints?.length);
         applyFrame(frame);
-        note.textContent = 'Receiving preview frames.';
+        if (!savedMap) showScanSource();
+        note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
+          : `${latest.sonar.detectionCount} model detections.` : 'Receiving preview frames.';
       },
     });
   } catch {
@@ -312,17 +354,18 @@ function configureSlice(points) {
 el('save-scan').addEventListener('click', () => {
   if (!activeSample?.points.length || !renderOptions || savedMap) return;
   viewer.draw(renderOptions);
-  const entry = { ...activeSample, t: performance.now() };
+  const entry = { ...activeSample, t: sonarReplayComplete ? activeSample.t : performance.now() };
   const samples = history.filter(sample => sample.t < entry.t);
   samples.push(entry);
   library.save({
     ...entry, id: crypto.randomUUID(), name: live ? 'Room scan' : 'Living room snapshot',
-    date: new Date().toISOString(), source: live ? 'live' : 'mock', space: live ? null : MOCK_SPACE,
+    date: new Date().toISOString(), source: live && latest.sonar?.acquisition !== 'simulated' ? 'live' : 'mock',
+    space: live ? null : MOCK_SPACE,
     history: samples, thumb: thumbnail(canvas),
   });
 });
 
-let archiveReady = false, trailKey, trail;
+let archiveReady = false, trailKey, trail, activeSavedMap;
 function render(time) {
   started ??= time;
   const elapsed = time - started;
@@ -335,10 +378,14 @@ function render(time) {
     livePoints = pendingCloud;
     pendingCloud = undefined;
   }
-  const latestTarget = live && (latestTargetAt === undefined || time - latestTargetAt > 1500) ? null : latest.target;
-  activeSample = { t: time, target: latestTarget?.confidence >= 0.5 ? latestTarget : null,
-    points: live ? livePoints ?? emptyPoints : demoPoints, frame: latest.frame, latencyMs: latest.latencyMs };
-  if (activeSample.points.length || history.length) sampleHistory(history, activeSample);
+  const latestTarget = live && !sonarReplayComplete &&
+    (latestTargetAt === undefined || time - latestTargetAt > 1500) ? null : latest.target;
+  activeSample = { t: sonarReplayComplete ? latestTargetAt ?? time : time,
+    target: latestTarget?.confidence >= 0.5 ? latestTarget : null,
+    points: live ? livePoints ?? emptyPoints : demoPoints, frame: latest.frame, latencyMs: latest.latencyMs,
+    sonar: latest.sonar, captureTime: latest.captureTime, snr: latest.snr };
+  if ((!sonarReplayComplete || history.at(-1)?.frame !== activeSample.frame) &&
+      (activeSample.points.length || history.length)) sampleHistory(history, activeSample);
   requestAnimationFrame(render);
   if (workspace !== 'scan') return;
 
@@ -350,8 +397,14 @@ function render(time) {
     viewer.replaceCloud(displayPoints);
     configureSlice(displayPoints ?? demoPoints);
   }
+  if ((!savedMap && frameSonar || savedMap?.sonar && activeSavedMap !== savedMap) && displayPoints?.length) {
+    viewer.frameCloud(displayPoints);
+    if (savedMap) activeSavedMap = savedMap;
+    else frameSonar = false;
+  }
   const target = sample.target ?? null;
-  const inspectionTrail = el('trail-enabled').checked;
+  el('trail-enabled').disabled = Boolean(sample.sonar);
+  const inspectionTrail = el('trail-enabled').checked && !sample.sonar;
   const key = inspectionTrail ? frame.history.filter(entry => entry.t <= frame.t).at(-1) : null;
   if (key !== trailKey) {
     trailKey = key;
@@ -365,6 +418,8 @@ function render(time) {
     heightRange: el('slice-enabled').checked ? [height - 0.22, height + 0.22] : undefined,
     trail, time: motion.matches ? 0 : tick * 100 };
   viewer.draw(renderOptions);
+  const markerLabel = sample.sonar ? 'Sonar person estimate' : 'Estimated zone';
+  if (marker.lastChild.textContent !== markerLabel) marker.lastChild.textContent = markerLabel;
   place(marker, target && [target.position[0], target.position[1] + 0.5, target.position[2]]);
   labels.forEach((label, i) => {
     const [x, , z] = anchors[i];
@@ -383,7 +438,11 @@ function render(time) {
     const vertexCount = mode.value === 'mesh' && viewer.hasMesh ? viewer.meshCount : viewer.count;
     set('vertices', numbers.format(Math.min(vertexCount, pointLimit)));
     set('frame', sample.frame ?? '—');
-    set('latency', sample.latencyMs === undefined ? '—' : `${Math.round(sample.latencyMs)} ms`);
+    set('signal-label', sample.sonar ? 'Mean SNR' : 'Latency');
+    set('latency', sample.sonar ? sample.snr == null ? '—' : `${sample.snr.toFixed(1)}×`
+      : sample.latencyMs === undefined ? '—' : `${Math.round(sample.latencyMs)} ms`);
+    el('capture-clock').hidden = !sample.sonar;
+    set('capture-time', sample.captureTime === undefined ? '—' : `${sample.captureTime.toFixed(2)} s`);
     set('estimate', target ? `${Math.round(target.confidence * 100)}%` : 'Unknown');
     if (savedMap) {
       let last = null;
@@ -401,7 +460,7 @@ function render(time) {
 requestAnimationFrame(() => setTimeout(() => {
   try {
     const room = buildRoom();
-    viewer = createViewer(canvas, room);
+    viewer = createViewer(canvas, room, undefined, resetScanCamera);
     viewer.preset(view, true);
     demoPoints = positions(room.cloud);
     configureSlice(demoPoints);

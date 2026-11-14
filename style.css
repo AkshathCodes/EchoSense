@@ -163,11 +163,13 @@ dialog form > div { display: flex; justify-content: flex-end; gap: 7px; }
   .instrument { width: 218px; }
 }
 @media (max-width: 650px) {
-  body { grid-template-rows: 48px minmax(470px, 1fr) auto; }
-  .header { padding: 0 10px; gap: 9px; }
+  body { grid-template-rows: 67px minmax(470px, 1fr) auto; }
+  .header { padding: 4px 10px; gap: 2px 8px; flex-wrap: wrap; align-content: center; }
   .header h1 { font-size: 11px; }
   .header h1, .header-divider { display: none; }
   .workspace-nav button { padding: 4px 6px; font-size: 11px; }
+  .workspace-nav a { padding: 4px 5px; font-size: 11px; }
+  .header .source { flex-basis: 100%; justify-content: flex-end; padding: 1px 0; line-height: 12px; }
   .brand { font-size: 17px; gap: 3px; }
   .brand img { width: 27px; height: 27px; }
   .scan-context { top: 16px; left: 13px; gap: 3px; }

@@ -107,7 +107,7 @@ function makeSignals(time, target, ringLayer, trail) {
   return new Float32Array(data);
 }
 
-export function createViewer(canvas, room, onCamera = () => {}) {
+export function createViewer(canvas, room, onCamera = () => {}, onReset) {
   const gl = canvas.getContext('webgl', { antialias: true, alpha: false });
   if (!gl) throw new Error('WebGL is unavailable in this browser.');
   const program = gl.createProgram();
@@ -205,6 +205,7 @@ export function createViewer(canvas, room, onCamera = () => {}) {
     if (Object.hasOwn(arrows, e.key)) (e.shiftKey || viewMode === 'top' ? pan : orbit)(...arrows[e.key]);
     else if (e.key === '+' || e.key === '=') zoom(0.86);
     else if (e.key === '-') zoom(1.16);
+    else if (e.key === '0' && onReset) onReset();
     else if (e.key === '0') preset(viewMode);
     else return;
     e.preventDefault();
@@ -227,6 +228,19 @@ export function createViewer(canvas, room, onCamera = () => {}) {
 
   return {
     preset, zoom,
+    frameCloud(points) {
+      if (!points.length) return;
+      const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < points.length; i++) {
+        const axis = i % 3;
+        low[axis] = Math.min(low[axis], points[i]);
+        high[axis] = Math.max(high[axis], points[i]);
+      }
+      desired.center = low.map((n, i) => (n + high[i]) / 2);
+      desired.distance = clamp(Math.hypot(...high.map((n, i) => n - low[i])) * 1.8, 2.8, 34);
+      current = clone(desired);
+      moved();
+    },
     get heading() { return (Math.round(-current.yaw * 180 / Math.PI) % 360 + 360) % 360; },
     camera: () => ({ state: clone(desired), view: viewMode }),
     follow(camera, name) {

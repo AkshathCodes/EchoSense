@@ -87,7 +87,7 @@
             <input type="text" id="address" placeholder="ws://127.0.0.1:8080" autocomplete="off" spellcheck="false">
             <button id="connect" type="submit">Connect</button>
           </form>
-          <p id="connection-note">Uses the preview decoder.</p>
+          <p id="connection-note">Start the sonar bridge, then connect.</p>
         </section>
         <section class="controls inspection" aria-label="Inspection tools">
           <div class="toggles">
@@ -141,7 +141,8 @@
     <div class="telemetry">
       <span>Vertices <strong id="vertices">—</strong></span>
       <span>Frame <strong id="frame">—</strong></span>
-      <span>Latency <strong id="latency">—</strong></span>
+      <span><span id="signal-label">Latency</span> <strong id="latency">—</strong></span>
+      <span id="capture-clock" hidden>Capture time <strong id="capture-time">—</strong></span>
       <span>Confidence <strong id="estimate">Unknown</strong></span>
     </div>
     <p id="camera-help">Drag to orbit <b>·</b> Shift + drag to pan <b>·</b> Scroll to zoom</p>

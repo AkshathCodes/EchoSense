@@ -50,10 +50,11 @@ export function openFeed(address, { decode, onFrame, onStatus, onInvalid = () =>
   let active = true, sequence = 0, applied = 0;
   onStatus('connecting');
   socket.addEventListener('open', () => { if (active) onStatus('connected'); });
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', event => {
     if (!active) return;
     active = false;
-    onStatus('disconnected');
+    onStatus(event.code === 1000 && event.reason === 'source complete' ? 'complete'
+      : event.code && event.code !== 1000 ? 'error' : 'disconnected');
   });
   socket.addEventListener('error', () => {
     if (!active) return;

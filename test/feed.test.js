@@ -2,6 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readPreview, openFeed } from '../src/feed.js';
 
+test('normal bridge EOF is distinct from a network failure', () => {
+  const socket = new EventTarget();
+  const statuses = [];
+  openFeed('ws://localhost:8765/ws', {
+    transport: () => socket, decode: JSON.parse, onFrame() {},
+    onStatus: value => statuses.push(value),
+  });
+  socket.dispatchEvent(new Event('open'));
+  socket.dispatchEvent(Object.assign(new Event('close'), { code: 1000, reason: 'source complete' }));
+  assert.deepEqual(statuses, ['connecting', 'connected', 'complete']);
+});
+
 test('preview data becomes geometry and a current estimate', () => {
   const data = readPreview(JSON.stringify({
     points: [[1, 2, 3], [4, 0, -1]], frame: 7,

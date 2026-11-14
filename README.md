@@ -25,13 +25,17 @@ to install. Stop the static development server with Ctrl+C.
   triangular wireframe. The wireframe has cyan, ice, and height-based tints.
 - **Max vertices** caps the rendered points or line vertices. **Point size**
   adjusts points only. **Frame skip** skips geometry uploads in socket mode
-  while retaining telemetry, and slows mock telemetry refresh in preview mode.
+  while retaining telemetry on the preview fixture. For sonar, it skips
+  whole frames so detections stay paired with their own point cloud. In
+  mock mode it slows telemetry refresh.
 - **Grid** draws a one-meter coordinate grid. **RF rings** shows three
   simulated anchors and their coverage rings. The amber outline shows the
   estimated zone when the source supplies an estimate above the UI threshold.
 - **Height slice** shows a 44 cm band centered at the selected height.
   **Estimate trail** shows recent confident estimates and leaves gaps when
-  the estimate was missing. **Camera** adds a heading and overhead map.
+  the estimate was missing. The trail is disabled for sonar frames because
+  the bridge supplies sensor-relative positions. **Camera** adds a heading
+  and overhead map.
 
 ## Saved Maps
 
@@ -77,16 +81,38 @@ cutaway. The wireframe and points are generated from surfaces at startup.
 
 ## Backend handoff
 
+To use the team's sonar WebSocket bridge, start it in a second terminal from
+the repository root using Python 3.11+:
+
+```powershell
+Set-Location websocket-bridge
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -B -m sonar_bridge --origin http://127.0.0.1:4173
+```
+
+Open `http://127.0.0.1:4173/` and click **Connect**. The default address is
+`ws://127.0.0.1:8765/ws`. Match `--origin` to the exact frontend host and port
+if you use a different URL. The default bridge stream is a simulated 45-point
+wall with no model detections. For NPZ recordings with optional detection JSON,
+see [bridge setup and manifest format](websocket-bridge/README.md). On normal
+replay completion the final frame remains available to inspect and save.
+
 `src/feed.js` owns the connection lifecycle. `openFeed(url, options)` receives
 an injected `decode(payload)` function plus `onFrame`, `onStatus` and optional
 `onInvalid` callbacks. It returns a disconnect function. The viewer consumes
-geometry and settings and has no WebSocket dependency. The demo uses only a
-static HTTP server. No backend code or WebSocket server ships with this UI.
+geometry and settings and has no WebSocket dependency. The static HTTP server
+and Python bridge run separately.
 
-No established wire contract was present in this checkout. The Connect
-control currently uses a **preview decoder** for experimentation. Once the
-backend format is agreed, replace the `decodePreview` callback in
-`src/main.js` with a decoder for that format. Normalize units and axes there.
+The Connect control accepts the bridge's [v0.1 wire envelope](websocket-bridge/PROTOCOL.md)
+with v0.2 SonarFrame points. `src/sonar.js` converts forward/left/up meters
+to viewer coordinates `[-left, up, -forward]`. The viewer replaces each
+sensor-relative frame because the bridge supplies no shared room pose.
+The UI shows mean SNR and original capture time. The strongest person-class
+detection supplies the existing estimate marker when it meets the UI
+confidence threshold. These are acoustic model predictions. Simulated
+acquisition remains labeled simulated, including on recorded replay.
+
 The UI expects a partial snapshot with optional `points` (flat XYZ
 `Float32Array`), `frame` (integer), `latencyMs` (number), and `target`
 (`{ position: [x,y,z], confidence }` with confidence 0–1, or `null` to clear).
@@ -94,8 +120,7 @@ An omitted field retains its last value. A zero-length point array clears
 geometry. Mesh and RF anchors are derived from the sample scene and are
 available in mock mode.
 
-For a quick test, the placeholder decoder accepts JSON such as the following.
-This is an example fixture, not a proposed requirement for the server.
+The adapter also accepts the earlier preview fixture for local UI testing:
 
 ```json
 {"frame":7,"latencyMs":22,"points":[[0,0,0],[1,1,1]],"target":{"position":[0,0,0],"confidence":0.71}}
