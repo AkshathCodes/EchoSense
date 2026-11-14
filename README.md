@@ -101,6 +101,44 @@ This is an example fixture, not a proposed requirement for the server.
 {"frame":7,"latencyMs":22,"points":[[0,0,0],[1,1,1]],"target":{"position":[0,0,0],"confidence":0.71}}
 ```
 
+## Acoustic Scan and Databricks
+
+Open **Acoustic Scan** in the workspace navigation. **Try sample scan** opens
+a labeled simulated room. Drag to orbit, move the You marker, or select an
+echo group to see the straight-line distance to its closest sampled return.
+
+On the scanning laptop, open Acoustic Scan on localhost. Use the built-in
+speaker and mic, mark an origin and forward direction, and enter the
+scanner's location, height, and aim for each set of five chirps. Heading
+0° is forward and 90° is right. Start with a rigid panel at tape-measured
+distances of 1 m and 2 m. For a room view, scan each surface from multiple
+positions and at two heights with the same scene and surface names. These
+names group returns for surface interpolation. Distances come from the
+echo range and the entered scanner pose. The You marker is set manually.
+
+The scanner previews the map immediately and offers **Download scan CSV**
+and **Download room map**. To open on a phone over a trusted local network,
+start the server with `HOST` set to `0.0.0.0` and open
+`http://<laptop-LAN-address>:4173/acoustic/` in Safari. Keep microphone
+capture on localhost. Use **Open map** on the phone or save the report at
+`acoustic/room-map.json` and choose **Load shared map**.
+
+1. Import `acoustic/aggregate.py` as a Python source notebook in Databricks.
+2. Upload `acoustic/sample-scans.csv` to a Unity Catalog volume for the
+   labeled simulation. For a measured run, use the CSV from Acoustic Scan.
+3. Run the definitions and widget cells. Set `input_csv` and `output_json` to
+   full paths such as `/Volumes/<catalog>/<schema>/<volume>/sample-scans.csv`
+   and `/Volumes/<catalog>/<schema>/<volume>/room-map.json`. Run the remaining
+   cells. The notebook shows scan coverage, rejection reasons, and range
+   error for accepted poses with a tape reference.
+4. Download `room-map.json` from the volume and open it in Acoustic Scan.
+
+The same aggregation can run locally with Python 3.10 or later.
+
+```sh
+python acoustic/aggregate.py acoustic/sample-scans.csv acoustic/room-map.json
+```
+
 ## Verify
 
 ```sh

@@ -86,6 +86,8 @@ input[type="checkbox"] { margin: 0; width: 13px; height: 13px; accent-color: #70
 .workspace-nav button { padding: 5px 11px; font-size: 12px; border-color: transparent; background: transparent; color: #a5bacb; white-space: nowrap; }
 .workspace-nav button:hover { background: #1a2835; }
 .workspace-nav button[aria-current="page"] { color: #bcE8ff; background: #193447; border-color: #2c5268; }
+.workspace-nav a { align-self: center; padding: 5px 8px; color: #a5bacb; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.workspace-nav a:hover, .workspace-nav a:focus-visible { color: #bce8ff; background: #1a2835; }
 .accent-button { padding: 7px 12px; color: #c9edff; background: #19374a; border-color: #3b6480; font-size: 12px; font-weight: 650; }
 button:disabled { opacity: .45; cursor: default; }
 .scan-capture { position: absolute; left: 23px; bottom: 58px; display: flex; align-items: center; gap: 10px; }
