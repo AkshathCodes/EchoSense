@@ -29,6 +29,11 @@
         </label>
       </div>
       <p id="map-message" class="message" role="status">Open a scan report to plot your measurements.</p>
+      <section id="scan-quality" class="scan-quality" aria-labelledby="quality-title" hidden>
+        <h3 id="quality-title">Scan quality</h3>
+        <p id="quality-summary"></p>
+        <ul id="quality-results" aria-label="Panel test results"></ul>
+      </section>
       <div id="map-body" hidden>
         <div class="layout">
           <div class="view-controls">
@@ -70,6 +75,12 @@
     <details class="capture">
       <summary>Capture a scan</summary>
       <p>Mark a room origin, then enter where the scanner is and where it’s pointed. Heading 0° is forward, 90° is right, and positive tilt points up.</p>
+      <div id="panel-test" class="toolbar panel-test" role="group" aria-label="Panel test setup">
+        <span>Panel test</span>
+        <button type="button" data-panel-case="one">Panel at 1 m</button>
+        <button type="button" data-panel-case="two">Panel at 2 m</button>
+        <button type="button" data-panel-case="clear">Panel removed</button>
+      </div>
       <form id="scan-form">
         <label for="scene-name">Scene
           <input id="scene-name" name="scene" required maxlength="40" placeholder="Panel A">
@@ -103,6 +114,16 @@
         </div>
         <details class="sensor-entry">
           <summary>Enter ultrasonic sensor readings</summary>
+          <div class="toolbar">
+            <label for="sensor-baud">Serial baud
+              <select id="sensor-baud">
+                <option value="9600">9600</option>
+                <option value="115200">115200</option>
+              </select>
+            </label>
+            <button id="read-serial" type="button">Read 5 from USB</button>
+          </div>
+          <p class="footnote">USB capture uses desktop Chrome. Close the serial monitor before connecting.</p>
           <label for="ranges">Five measured ranges in meters, one per line. Use <code>timeout</code> for a missed return.
             <textarea id="ranges" rows="5" maxlength="100" spellcheck="false"></textarea>
           </label>

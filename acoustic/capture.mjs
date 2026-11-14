@@ -1,5 +1,45 @@
 import { analyzePulse, directSearchSeconds, makeChirp, pulseSpacing, trialCount } from "./audio.mjs";
 
+export async function readSerialBatch(port, baudRate, timeoutMs) {
+  await port.open({ baudRate });
+  try {
+    if (!port.readable) throw new Error("The serial device opened without a readable stream.");
+    const reader = port.readable.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const records = [];
+    let remainder = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void reader.cancel().catch(() => {});
+    }, timeoutMs);
+    try {
+      while (records.length < trialCount) {
+        const { value, done } = await reader.read();
+        if (done) {
+          if (timedOut) throw new Error(`USB capture timed out after ${records.length} of ${trialCount} readings. Check the baud rate and confirm the board streams newline-terminated readings.`);
+          throw new Error("USB connection ended before all five readings arrived.");
+        }
+        const lines = (remainder + decoder.decode(value, { stream: true })).split("\n");
+        remainder = lines.pop();
+        for (const line of lines.slice(0, trialCount - records.length)) {
+          if (line.length > 32) throw new Error("USB record is too long. Send one distance in meters or timeout per line.");
+          records.push(line.trim());
+        }
+        if (records.length < trialCount && remainder.length > 32) {
+          throw new Error("USB record is too long. Send one distance in meters or timeout per line.");
+        }
+      }
+      return records.join("\n");
+    } finally {
+      clearTimeout(timer);
+      reader.releaseLock();
+    }
+  } finally {
+    await port.close();
+  }
+}
+
 export async function openRecorder() {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone capture requires a secure origin. Open localhost on the scanning laptop.");

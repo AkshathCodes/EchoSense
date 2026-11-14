@@ -45,6 +45,13 @@ const surfaces = [
   { name: "Low obstacle", poses: [0.2, 0.65].flatMap((x) =>
     [0.35, 0.8].map((height) => [x, 0, height, 0, 0, 1.15])) },
 ];
+for (let index = 0; index < trialCount; index += 1) {
+  const trial = simulateTrial(2.85, index < 2 ? 0.24 : 0, false, index + 29);
+  const expectedStatus = index < 2 ? "ok" : "no_echo";
+  if (trial.status !== expectedStatus) throw new Error(`Unexpected panel-removed result: ${trial.status}`);
+  lines.push(["simulated", "Panel removed", 0, 0, 1, 0, 0, "Background", null, index + 1,
+    trial.status, trial.range_m, trial.echo_ratio].join(","));
+}
 for (const { name, poses } of surfaces) {
   for (const [x, z, height, heading, pitch, reference] of poses) {
     for (let index = 0; index < trialCount; index += 1) {

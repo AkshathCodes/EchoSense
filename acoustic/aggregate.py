@@ -201,6 +201,16 @@ def quality_chart(source: Source, rows: list[SceneQuality]) -> str:
     )
 
 
+def reference_comparison(report: Report) -> list[tuple[str, str, float, float | None, float | None, int, int]]:
+    """Include rejected poses so missing estimates remain visible beside measured error."""
+    return [
+        (point["scene"], point["surface"], point["reference_m"], point["range_m"],
+         point["error_m"] * 100 if point["error_m"] is not None else None,
+         point["accepted"], point["total"])
+        for point in report["points"] if point["reference_m"] is not None
+    ]
+
+
 def load_trials(path: Path) -> list[Trial]:
     with path.open(newline="", encoding="utf-8-sig") as file:
         return read_trials(file)
@@ -252,6 +262,11 @@ if "dbutils" in globals():
         "scene string, poses long, mapped_poses long, coverage_pct double, "
         "trials long, usable_trials long, usable_trial_pct double, reference_poses long, "
         "mean_absolute_error_m double, max_absolute_error_m double",
+    ))
+    display(spark.createDataFrame(
+        reference_comparison(report),
+        "scene string, surface string, tape_m double, estimated_m double, "
+        "absolute_error_cm double, usable_trials long, total_trials long",
     ))
 
 # COMMAND ----------

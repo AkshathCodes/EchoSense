@@ -92,6 +92,21 @@
       "surface": ""
     },
     {
+      "scene": "Panel removed",
+      "station_m": 0.0,
+      "reference_m": null,
+      "range_m": null,
+      "spread_m": 0.0,
+      "error_m": null,
+      "accepted": 2,
+      "total": 5,
+      "depth_m": 0.0,
+      "height_m": 1.0,
+      "heading_deg": 0.0,
+      "pitch_deg": 0.0,
+      "surface": "Background"
+    },
+    {
       "scene": "Sample room",
       "station_m": 0.2,
       "reference_m": 1.15,

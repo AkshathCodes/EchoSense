@@ -1,4 +1,4 @@
-import { captureTrials, openRecorder, toWave } from "./capture.mjs";
+import { captureTrials, openRecorder, readSerialBatch, toWave } from "./capture.mjs";
 import { buildRoom, parseRangeTrials, previewReport, scanKey, stationPose, validateReport } from "./map.mjs";
 import { drawRoom, initialView } from "./room-view.mjs";
 
@@ -17,6 +17,7 @@ const elements = {
   form: byId("scan-form"),
   scan: byId("scan"),
   addRanges: byId("add-ranges"),
+  readSerial: byId("read-serial"),
   ranges: byId("ranges"),
   download: byId("download"),
   downloadAudio: byId("download-audio"),
@@ -34,6 +35,12 @@ let model;
 let view = initialView;
 let selectedKey;
 let drawnHits = [];
+
+const panelCases = {
+  one: { scene: "Panel at 1 m", reference: 1, surface: "Panel" },
+  two: { scene: "Panel at 2 m", reference: 2, surface: "Panel" },
+  clear: { scene: "Panel removed", reference: "", surface: "Background" },
+};
 
 function selectedPoints() {
   return currentReport.points.filter((point) => point.scene === elements.scene.value)
@@ -101,8 +108,33 @@ function showReport(payload, preferredScene) {
   elements.mapMessage.textContent = "";
   elements.mapMessage.classList.remove("error");
   elements.mapBody.hidden = false;
+  showQuality(currentReport.points);
   selectedKey = undefined;
   resetPerson();
+}
+
+function showQuality(points) {
+  const mapped = points.filter((point) => point.range_m !== null);
+  const usable = points.reduce((count, point) => count + point.accepted, 0);
+  const total = points.reduce((count, point) => count + point.total, 0);
+  const errors = mapped.flatMap((point) => point.error_m === null ? [] : [point.error_m]);
+  const meanError = errors.reduce((sum, error) => sum + error, 0) / errors.length;
+  const accuracy = errors.length ? ` · ${(meanError * 100).toFixed(1)} cm mean error across ${errors.length} mapped tape references` : "";
+  byId("quality-summary").textContent = `${usable}/${total} usable readings · ${mapped.length}/${points.length} mapped positions${accuracy}`;
+  const results = [];
+  for (const { scene } of Object.values(panelCases)) {
+    const batches = points.filter((point) => point.scene === scene);
+    for (const point of batches) {
+      const row = document.createElement("li");
+      const expected = point.reference_m === null ? "" : ` · Tape ${point.reference_m.toFixed(2)} m`;
+      const actual = point.range_m === null ? "Uncertain" : `${point.range_m.toFixed(2)} m return`;
+      row.textContent = `${scene} · ${actual}${expected} · ${point.accepted}/${point.total} usable`;
+      results.push(row);
+    }
+  }
+  byId("quality-results").replaceChildren(...results);
+  byId("quality-results").hidden = results.length === 0;
+  byId("scan-quality").hidden = false;
 }
 
 function showError(element, error) {
@@ -232,6 +264,45 @@ function readScanPose() {
     pitch_deg: Number(fields.get("pitch")), surface: String(fields.get("surface")).trim(), reference_m: reference };
 }
 
+byId("panel-test").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-panel-case]");
+  if (!button || elements.scan.disabled) return;
+  const setup = panelCases[button.dataset.panelCase];
+  byId("scene-name").value = setup.scene;
+  byId("surface").value = setup.surface;
+  byId("reference").value = "";
+  byId("reference").placeholder = setup.reference === "" ? "" : setup.reference.toFixed(2);
+  elements.captureMessage.classList.remove("error");
+  elements.captureMessage.textContent = setup.reference === "" ?
+    "Move the panel out of the beam. Keep the scanner in the same position." :
+    `Set the panel at ${setup.reference} m from the scanner. Enter your actual tape measurement before recording.`;
+});
+
+function setCaptureBusy(busy) {
+  elements.scan.disabled = busy;
+  elements.addRanges.disabled = busy;
+  elements.readSerial.disabled = busy || !navigator.serial;
+}
+
+elements.readSerial.disabled = !navigator.serial;
+elements.readSerial.addEventListener("click", async () => {
+  if (elements.scan.disabled || !elements.form.reportValidity()) return;
+  setCaptureBusy(true);
+  elements.captureMessage.classList.remove("error");
+  try {
+    const pose = readScanPose();
+    const baudRate = Number(byId("sensor-baud").value);
+    const port = await navigator.serial.requestPort();
+    elements.captureMessage.textContent = "Keep the scanner still while EchoSense reads five pings.";
+    const ranges = await readSerialBatch(port, baudRate, 10000);
+    addTrials(pose, parseRangeTrials(ranges));
+  } catch (error) {
+    showError(elements.captureMessage, error);
+  } finally {
+    setCaptureBusy(false);
+  }
+});
+
 elements.addRanges.addEventListener("click", () => {
   if (elements.scan.disabled || !elements.form.reportValidity()) return;
   elements.captureMessage.classList.remove("error");
@@ -246,8 +317,7 @@ elements.addRanges.addEventListener("click", () => {
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (elements.scan.disabled) return;
-  elements.scan.disabled = true;
-  elements.addRanges.disabled = true;
+  setCaptureBusy(true);
   elements.captureMessage.classList.remove("error");
   elements.captureMessage.textContent = "Keep the scanner still during the five chirps.";
   let recorder;
@@ -265,8 +335,7 @@ elements.form.addEventListener("submit", async (event) => {
       recorder.stream.getTracks().forEach((track) => track.stop());
       await recorder.context.close();
     }
-    elements.scan.disabled = false;
-    elements.addRanges.disabled = false;
+    setCaptureBusy(false);
   }
 });
 

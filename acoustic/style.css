@@ -84,4 +84,11 @@ form .toolbar { flex-basis: 100%; }
 .sensor-entry { flex-basis: 100%; margin-block: 6px; }
 .sensor-entry label { display: block; }
 .sensor-entry textarea { display: block; width: min(100%, 330px); margin: 6px 0 10px; padding: 8px; font: inherit; background: #172720; color: inherit; border: 1px solid var(--border); border-radius: 7px; }
+.sensor-entry .toolbar label { flex: 0 1 auto; }
+.panel-test { margin-block: 12px; }
+.panel-test span { font-weight: 700; }
+.scan-quality { margin-block: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.scan-quality h3 { margin: 0 0 4px; font-size: 1.03rem; }
+.scan-quality p, #quality-results { color: var(--muted); font-size: .88rem; }
+#quality-results { padding-left: 20px; margin: 8px 0 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }

@@ -29,6 +29,11 @@ simulated,Panel at 2 m,1.1,0,1,0,0,,2,2,ambiguous,,0.239311685248793
 simulated,Panel at 2 m,1.1,0,1,0,0,,2,3,ambiguous,,0.2420138533350296
 simulated,Panel at 2 m,1.1,0,1,0,0,,2,4,ok,2.06871875,0.2359832362051437
 simulated,Panel at 2 m,1.1,0,1,0,0,,2,5,ok,2.0794375,0.236624112087547
+simulated,Panel removed,0,0,1,0,0,Background,,1,ok,2.8511875,0.24220633266348202
+simulated,Panel removed,0,0,1,0,0,Background,,2,ok,2.8511875,0.2504325442053393
+simulated,Panel removed,0,0,1,0,0,Background,,3,no_echo,,0.01597295825997828
+simulated,Panel removed,0,0,1,0,0,Background,,4,no_echo,,0.01683049258661112
+simulated,Panel removed,0,0,1,0,0,Background,,5,no_echo,,0.017738620350051762
 simulated,Sample room,0.2,0.25,0.6,0,0,Back wall,2.35,1,ok,2.3331145833333333,0.24286530326698896
 simulated,Sample room,0.2,0.25,0.6,0,0,Back wall,2.35,2,ok,2.3402604166666667,0.2280074510234437
 simulated,Sample room,0.2,0.25,0.6,0,0,Back wall,2.35,3,ok,2.3509791666666664,0.24384491703590228
