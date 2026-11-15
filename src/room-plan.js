@@ -8,7 +8,7 @@ const css = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${
 const objectTints = ['#ff9f33', '#f2c14e', '#ef6f6c', '#c58af9', '#7bd88f', '#5cc8ff'];
 
 /** `path` is the scanner trajectory as [x, y, z]; `simulated` adds a visible label. */
-export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, title = 'ECHO room analysis',
+export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, title = 'ECHO room analysis', attribution = '',
   sonarSurface = [] } = {}) {
   const ctx = canvas.getContext('2d'), { width, height } = canvas;
   const header = 54, footer = 64, margin = 28;
@@ -33,6 +33,11 @@ export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, t
     ctx.textAlign = 'right';
     ctx.fillText('SIMULATED DATA', width - margin, 26);
     ctx.textAlign = 'left';
+  }
+  if (attribution) {
+    ctx.fillStyle = '#8fa6b5';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(attribution, margin, height - 34);
   }
 
   const all = [...wallCells, ...floorCells, ...objects.flatMap(o => o.cells)];

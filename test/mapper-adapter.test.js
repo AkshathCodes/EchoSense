@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMapperSession, pointSpacing, classifierSteps, MAPPER_MAX_POINTS } from '../src/mapper-adapter.js';
+import { createMapperSession, mapperLabel, pointSpacing, classifierSteps, MAPPER_MAX_POINTS } from '../src/mapper-adapter.js';
 import { decodeSocketFrame } from '../src/sonar.js';
 import { simulate } from './scan-simulator.js';
 import { WALL, FLOOR, OBJECT } from '../src/room-classifier.js';
@@ -34,6 +34,45 @@ const scan = (() => {
   return { cloud: new Float32Array(cloud), hits };
 })();
 const room = scan.cloud;
+
+for (const [delivery, acquisition, label] of [
+  ['live', 'live', 'LiDAR map'],
+  ['live', 'simulated', 'Simulated LiDAR map'],
+  ['simulated', 'simulated', 'Simulated LiDAR map'],
+  ['recorded', 'live', 'LiDAR map / replay'],
+  ['recorded', 'simulated', 'Simulated LiDAR map / replay'],
+  ['recorded', 'recorded', 'LiDAR map / original acquisition unknown / replay'],
+]) {
+  test(`mapper preserves ${delivery}/${acquisition} provenance without changing classification`, async () => {
+    const raw = JSON.parse(mapperMessage(room.subarray(0, 300)));
+    raw.source = delivery;
+    raw.acquisition_source = acquisition;
+    raw.frame.meta.source = acquisition;
+    const frame = await createMapperSession().decode(JSON.stringify(raw));
+    assert.equal(frame.sonar.delivery, delivery);
+    assert.equal(frame.sonar.acquisition, acquisition);
+    assert.equal(frame.mapper.delivery, delivery);
+    assert.equal(frame.mapper.acquisition, acquisition);
+    assert.equal(frame.mapper.stale, false);
+    assert.equal(mapperLabel(frame.mapper), label);
+    assert.equal(mapperLabel({ ...frame.mapper, stale: true }), `Last map / historical / ${label}`);
+    assert.equal(frame.points.length, 300);
+  });
+}
+
+test('invalid provenance cannot be promoted to live', async () => {
+  const raw = JSON.parse(mapperMessage(room.subarray(0, 30)));
+  delete raw.acquisition_source;
+  await assert.rejects(createMapperSession().decode(JSON.stringify(raw)), /provenance/);
+  raw.acquisition_source = 'invented';
+  await assert.rejects(createMapperSession().decode(JSON.stringify(raw)), /provenance/);
+});
+
+test('legacy recorded sonar is explicitly of unknown original provenance', async () => {
+  const { readSonarStatus, sonarText } = await import('../src/mapper-adapter.js');
+  assert.match(sonarText(readSonarStatus({ state: 'agree', range_m: 1, acquisition_source: 'recorded' })),
+    /^Recorded sonar \(original acquisition unknown\)/);
+});
 
 test('mapper map frames become classified viewer frames, live points drawn on top', async () => {
   const session = createMapperSession();

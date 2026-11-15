@@ -22,17 +22,26 @@ const LIVE_COLOR = [1, 0.36, 0.25], SONAR_COLOR = [1, 0.25, 0.9];
 const sonarStates = ['no_sonar', 'agree', 'sonar_closer', 'lidar_no_return', 'sonar_farther'];
 const meters = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
 
+/** Delivery and original acquisition are separate; recorded means unknown acquisition here. */
+export function mapperLabel({ delivery, acquisition, stale = false }) {
+  const origin = acquisition === 'simulated' ? 'Simulated LiDAR map'
+    : acquisition === 'live' ? 'LiDAR map' : 'LiDAR map / original acquisition unknown';
+  return `${stale ? 'Last map / historical / ' : ''}${origin}${delivery === 'recorded' ? ' / replay' : ''}`;
+}
+
 /** Reads `meta.sonar`. Returns null when no sonar is attached or the block is malformed. */
 export function readSonarStatus(raw) {
   if (!raw || typeof raw !== 'object' || !sonarStates.includes(raw.state)) return null;
   return { state: raw.state, range: meters(raw.range_m), lidarNear: meters(raw.lidar_near_m),
     lidarMedian: meters(raw.lidar_median_m), surfacePoints: Number.isSafeInteger(raw.surface_points) ? raw.surface_points : 0,
-    synthetic: raw.synthetic === true, blind: raw.state === 'sonar_closer' || raw.state === 'lidar_no_return' };
+    synthetic: raw.synthetic === true, acquisition: raw.acquisition_source,
+    blind: raw.state === 'sonar_closer' || raw.state === 'lidar_no_return' };
 }
 
 /** One line for the operator. Says plainly when the readings are simulated. */
 export function sonarText(sonar) {
-  const tag = sonar.synthetic ? 'Simulated sonar' : 'Sonar';
+  const tag = sonar.synthetic ? 'Simulated sonar'
+    : sonar.acquisition === 'recorded' ? 'Recorded sonar (original acquisition unknown)' : 'Sonar';
   const reading = sonar.range === null ? 'no echo' : `${sonar.range.toFixed(2)} m`;
   const lidar = sonar.lidarNear === null ? 'LiDAR no return' : `LiDAR ${sonar.lidarNear.toFixed(2)} m`;
   const verdict = { agree: 'agree', sonar_closer: 'surface LiDAR cannot see', lidar_no_return: 'surface LiDAR cannot see',
@@ -100,6 +109,8 @@ export function createMapperSession() {
       let raw;
       try { raw = JSON.parse(payload); } catch { return undefined; }
       if (raw?.type !== 'sonar_frame' || raw.frame?.meta?.kind !== 'lidar_map') return undefined;
+      const modes = ['live', 'simulated', 'recorded'];
+      if (!modes.includes(raw.source) || !modes.includes(raw.acquisition_source)) throw new Error('Invalid mapper provenance');
       const rows = raw.frame.points;
       if (raw.protocol_version !== '0.1' || !Number.isSafeInteger(raw.sequence) || !Number.isFinite(raw.timestamp) ||
           !Array.isArray(rows) || rows.length > MAPPER_MAX_POINTS) throw new Error('Invalid mapper frame');
@@ -132,9 +143,10 @@ export function createMapperSession() {
       for (let i = mapCount; i < rows.length; i++) colors.set(i < mapCount + liveCount ? LIVE_COLOR : SONAR_COLOR, i * 3);
       return { points, colors, hits, frame: raw.sequence, captureTime: raw.timestamp,
         snr: mapCount ? hitSum / mapCount : null,
-        sonar: { delivery: 'live', acquisition: 'live', detectionCount: null },
+        sonar: { delivery: raw.source, acquisition: raw.acquisition_source, detectionCount: null },
         mapper: { mapPoints: mapCount, livePoints: liveCount, objects: analysis.objects.length,
-          floorArea: analysis.floorArea, roomHeight: analysis.roomHeight, sonar } };
+          floorArea: analysis.floorArea, roomHeight: analysis.roomHeight, sonar,
+          delivery: raw.source, acquisition: raw.acquisition_source, stale: false } };
     },
   };
 }

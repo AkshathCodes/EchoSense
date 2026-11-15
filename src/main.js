@@ -5,7 +5,7 @@ import { openFeed } from './feed.js';
 import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
 import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL, LIDAR_REPLAY_BYTES, readLidarReplay } from './lidar.js';
 import { createCues } from './audio-cues.js';
-import { createMapperSession, sonarText } from './mapper-adapter.js';
+import { createMapperSession, mapperLabel, sonarText } from './mapper-adapter.js';
 import { drawRoomPlan } from './room-plan.js';
 import { classifyRoom, classNames } from './room-classifier.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
@@ -30,8 +30,7 @@ async function decodeLidar(payload) {
   return frame;
 }
 // Rishi's mapper (lidar/mapper) sends its map in the sonar envelope. Give it surface classes.
-const mapper = createMapperSession();
-const decodeSonarOrMapper = async payload => await mapper.decode(payload) ?? decodeSocketFrame(payload);
+let mapper = createMapperSession();
 const marker = el('target-marker'), loading = el('loading');
 const labels = anchors.map((_, i) => {
   const label = document.createElement('span');
@@ -111,7 +110,9 @@ function openSaved(map) {
   el('connection-note').hidden = true;
   el('feed-mode-row').hidden = el('lidar-file-row').hidden = el('lidar-panel').hidden = true;
   updateModeAvailability();
-  writeSource(map.lidar ? lidarLabel({ ...map.lidar, mode: 'replay' }) : map.sonar ? `Saved · ${sonarLabel(map.sonar)}` : map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
+  el('mapper-tools').hidden = el('sonar-readout').hidden = true;
+  writeSource(map.mapper ? mapperLabel({ ...map.mapper, delivery: 'recorded' })
+    : map.lidar ? lidarLabel({ ...map.lidar, mode: 'replay' }) : map.sonar ? `Saved · ${sonarLabel(map.sonar)}` : map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
   source.removeAttribute('data-live');
   set('study', map.name);
   show('scan');
@@ -207,15 +208,16 @@ function writeSource(label) {
 
 function showScanSource() {
   const sonar = latest.sonar, scan = latest.lidar;
-  source.toggleAttribute('data-live', live && (scan ? Boolean(disconnect && scan.publisher && scan.simulated === false && scan.mode === 'live')
-    : sonar?.acquisition !== 'simulated'));
   const mapped = live && !scan ? latest.mapper : null;
+  source.toggleAttribute('data-live', live && (scan ? Boolean(disconnect && scan.publisher && scan.simulated === false && scan.mode === 'live')
+    : Boolean(disconnect && (mapped ? !mapped.stale && mapped.delivery === 'live' && mapped.acquisition === 'live'
+      : sonar?.delivery === 'live' && sonar?.acquisition === 'live'))));
   writeSource(!live ? 'Mock data' : scan ? (disconnect || scan.mode === 'replay' ? '' : 'Last scan · ') + lidarLabel(scan)
-    : mapped ? 'LiDAR map' : sonar ? sonarLabel(sonar) : 'Socket data');
+    : mapped ? mapperLabel(mapped) : sonar ? sonarLabel(sonar) : 'Socket data');
   set('study', !live ? 'Living room / sample scan' : scan ? 'LiDAR · Spatial memory'
     : mapped ? 'LiDAR · Mapped room' : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
   el('mapper-tools').hidden = !mapped;
-  if (!mapped) el('sonar-readout').hidden = true;
+  el('sonar-readout').hidden = !mapped || !mapped.stale && !mapped.sonar;
   el('lidar-panel').hidden = !(live && scan);
   // In LiDAR mode the "color" render mode shows the classifier's surface classes.
   mode.querySelector('[value="color"]').textContent = live && (scan || mapped) ? 'Surface classes' : 'Natural color';
@@ -239,11 +241,12 @@ function showRoomAnalysis(force = false) {
   const analysis = sample.mapper && !sample.lidar ? mapper.analysis
     : savedMap ? classifyRoom(sample.points, { hits: sample.hits }) : lidar.analyse();
   // The mapper does not send the scanner path on this channel, so none is drawn.
-  const { path, simulated } = sample.lidar ?? { path: [], simulated: false };
+  const { path, simulated } = sample.lidar ?? { path: [], simulated: sample.mapper?.acquisition === 'simulated' };
   const sonarSurface = sample.mapper && !sample.lidar ? mapper.sonarSurface : [];
   const lastGap = path.lastIndexOf(null);
   // The plan renderer draws one polyline; avoid joining across missing poses.
-  drawRoomPlan(el('room-plan'), analysis, { path: path.slice(lastGap + 1), simulated, sonarSurface });
+  drawRoomPlan(el('room-plan'), analysis, { path: path.slice(lastGap + 1), simulated, sonarSurface,
+    attribution: sample.mapper ? mapperLabel(sample.mapper) : '' });
   const total = analysis.labels.length || 1;
   set('room-analysis-note', classNames.slice(1).map((name, i) =>
     `${name} ${Math.round(analysis.counts[i + 1] / total * 100)}%`).join(' · ') +
@@ -332,6 +335,7 @@ function status(state) {
     error: ['Connection failed', 'Check the bridge URL, server, and allowed browser origin.'],
     complete: ['Replay complete', 'Showing the last recorded frame. Connect to replay again.'],
     disconnected: ['Local preview', 'Start the bridge, then connect.'],
+    preview: ['Local preview', 'Explicit mock preview selected. No sensor observations.'],
   };
   connection.dataset.status = state;
   [connection.textContent, note.textContent] = messages[state];
@@ -344,7 +348,21 @@ function status(state) {
     sonarReplayComplete = true;
     cues.play('replay_complete');
   }
-  if (!busy && state !== 'complete' && feedMode.value === 'lidar' && latest.lidar && livePoints?.length) {
+  if (!busy && state !== 'preview' && latest.mapper) {
+    // A disconnected feed is historical evidence, never a reason to invent a new room.
+    sonarReplayComplete = true;
+    latest.mapper = { ...latest.mapper, stale: true, sonar: null };
+    planPoints = undefined;
+    set('connection-state', state === 'complete' ? 'Replay complete' : state === 'error' ? 'Connection lost' : 'Disconnected');
+    set('connection-note', 'Showing last map (historical). Feed is not current. Connect again or select Mock preview.');
+    const readout = el('sonar-readout');
+    readout.textContent = 'Sonar unavailable: feed disconnected; previous markers are historical.';
+    readout.removeAttribute('data-blind');
+    readout.hidden = Boolean(savedMap);
+    if (!savedMap) showScanSource();
+    return;
+  }
+  if (!busy && state !== 'complete' && state !== 'preview' && feedMode.value === 'lidar' && latest.lidar && livePoints?.length) {
     // Leave the operator's observations in view after a disconnect.
     sonarReplayComplete = true;
     if (latest.lidar.mode === 'live') latest.lidar = { ...latest.lidar, publisher: false, scanner: null };
@@ -381,11 +399,14 @@ function status(state) {
 feedMode.addEventListener('change', () => {
   address.value = feedMode.value === 'lidar' ? LIDAR_URL : SONAR_URL;
   el('lidar-file-row').hidden = feedMode.value !== 'lidar';
-  if (feedMode.value === 'sonar') status('disconnected');
+  if (feedMode.value === 'mock') status('preview');
+  else if (feedMode.value === 'sonar') status('disconnected');
+  connect.disabled = address.disabled = feedMode.value === 'mock';
 });
 
 el('connection-form').addEventListener('submit', event => {
   event.preventDefault();
+  if (feedMode.value === 'mock') return;
   if (disconnect) {
     disconnect();
     return;
@@ -393,14 +414,17 @@ el('connection-form').addEventListener('submit', event => {
   try {
     let firstFrame = true;
     lidar.reset();
-    mapper.reset();
+    // Keep the historical room analysis until a valid frame from the new connection arrives.
+    const incomingMapper = createMapperSession();
     showLidarPause();
     disconnect = openFeed(address.value.trim(), {
-      decode: feedMode.value === 'lidar' ? decodeLidar : decodeSonarOrMapper,
+      decode: feedMode.value === 'lidar' ? decodeLidar
+        : async payload => await incomingMapper.decode(payload) ?? decodeSocketFrame(payload),
       onStatus: status,
       onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
         if (firstFrame) {
+          mapper = incomingMapper;
           firstFrame = false;
           scanCameraBeforeSonar ??= savedMap ? scanSettings.camera : viewer?.camera();
           live = true;
@@ -431,7 +455,7 @@ el('connection-form').addEventListener('submit', event => {
           note.textContent = `${numbers.format(m.mapPoints)} map points · ${m.objects} object${m.objects === 1 ? '' : 's'} · ` +
             `floor seen ${m.floorArea.toFixed(1)} m²` + (m.roomHeight === null ? '' : ` · ceiling ${m.roomHeight.toFixed(2)} m`);
           const readout = el('sonar-readout');
-          readout.hidden = !m.sonar;
+          readout.hidden = Boolean(savedMap) || !m.sonar;
           if (m.sonar) {
             readout.textContent = sonarText(m.sonar) + (m.sonar.surfacePoints ? ` · ${m.sonar.surfacePoints} marked` : '');
             readout.toggleAttribute('data-blind', m.sonar.blind);
@@ -524,7 +548,9 @@ el('save-scan').addEventListener('click', () => {
   library.save({
     ...entry, id: crypto.randomUUID(), name: live ? 'Room scan' : 'Living room snapshot',
     date: new Date().toISOString(),
-    source: live && latest.sonar?.acquisition !== 'simulated' && !latest.lidar?.simulated ? 'live' : 'mock',
+    source: latest.mapper ? (latest.mapper.acquisition === 'live' ? 'live'
+      : latest.mapper.acquisition === 'simulated' ? 'mock' : 'recorded')
+      : live && latest.sonar?.acquisition !== 'simulated' && !latest.lidar?.simulated ? 'live' : 'mock',
     space: live ? null : MOCK_SPACE,
     history: samples, thumb: thumbnail(canvas),
   });
