@@ -1,8 +1,15 @@
 # Status
 
-_Last updated 2026-11-14 (session 5: moved into the EchoSense monorepo as `sonar-ml/`). Update this file whenever something starts or stops working._
+_Last updated 2026-11-14 (session 6: Databricks pipeline, branch `databricks-pipeline`). Update this file whenever something starts or stops working._
 
 ## Summary
+
+> **Pivot (2026-11-14, session 7):** no ultrasonic sensor could be sourced. The
+> sensor is now the **iPhone Pro LiDAR**, with the rule that nothing depends on
+> visible light. Live dark-safe mapping lives in [`lidar/`](../../lidar/README.md)
+> ([ADR-0015](decisions/0015-iphone-lidar-dark-mapping.md)). The sonar work below
+> stays as history; its pipeline pattern carries over.
+
 
 **No hardware yet.** Perception runs end to end on simulated data:
 simulate → 3D map → clusters → classifier → **detections JSON** for the app
@@ -16,6 +23,13 @@ at the start of session 3. **Lying people: 32%** (35% with sweep mode), up from
 20% ([ADR-0012](decisions/0012-person-recall.md),
 [ADR-0013](decisions/0013-lying-people-sensing.md)).
 **Recommended flags everywhere: `--pings 4 --bias person=2`.**
+
+**Databricks (session 6, deployed and run end to end on 200 scenes):** the whole pipeline also exists as
+a Databricks Asset Bundle: parallel simulation → bronze/silver/gold tables with
+data-quality expectations → MLflow training → UC model `@champion` → gold
+detection and end-to-end outcome tables. Runs on the lead's Free Edition
+workspace (~8 min for 200 scenes). See [databricks/README.md](../databricks/README.md),
+[ADR-0014](decisions/0014-databricks-lakehouse.md).
 
 ## What works (verified 2026-11-14)
 
@@ -119,6 +133,8 @@ guesses; person geometry is crude; expect a drop on real data.
     so its numbers don't validate our 40 kHz assumptions one to one.
 
 ## Next up (suggested order)
+
+0. **Databricks:** run at 2,000 scenes (`databricks bundle run sonar_lakehouse --params seed=3`), drop `acoustic/sample-scans.csv` into the landing volume, then: serving endpoint, AI/BI dashboard + Genie over gold tables, viewer as a Databricks App.
 
 1. **Train the recommended config at 2,000 scenes** (`generate --scenes 2000 --pings 4`) and use it as the demo model; the 1,000-scene numbers above should improve slightly.
 2. **Floor removal (ground-plane fit)**: needed before sensor tilt can help, since tilt doubled merges.

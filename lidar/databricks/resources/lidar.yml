@@ -1,0 +1,41 @@
+resources:
+  schemas:
+    lidar:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: EchoSense iPhone LiDAR sessions (lidar/databricks, ADR-0016)
+
+  volumes:
+    lidar_landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.lidar.name}
+      name: landing
+      volume_type: MANAGED
+      comment: "lidar/frames/*.parquet, lidar/maps/*.parquet, lidar/sessions/*.json from `lidar_mapper export --upload`."
+
+  pipelines:
+    lidar_pipeline:
+      name: echosense-lidar-lakehouse
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.lidar.name}
+      serverless: true
+      channel: CURRENT
+      continuous: false
+      libraries:
+        - file:
+            path: ../pipeline/lidar_pipeline.py
+      configuration:
+        lidar.landing_path: /Volumes/${var.catalog}/${resources.schemas.lidar.name}/landing/lidar
+
+  jobs:
+    lidar_ingest:
+      name: echosense-lidar-ingest
+      description: Refresh the LiDAR pipeline. Triggers automatically when a new session manifest lands.
+      trigger:
+        file_arrival:
+          url: /Volumes/${var.catalog}/${resources.schemas.lidar.name}/landing/lidar/sessions/
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: refresh_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.lidar_pipeline.id}
