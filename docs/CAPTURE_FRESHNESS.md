@@ -43,11 +43,11 @@ Older viewers may ignore the additive metadata and will not gain this indication
 
 ## Launch and verification
 
-Use this isolated checkout: `C:\Users\charv\EchoRescue-capture-freshness-local`.
+Run these commands from the repository root, with the dev dependencies in `.venv`.
 Run `node serve.js` in terminal 1. In terminal 2 at the same root:
 
 ```powershell
-$python = 'C:\Users\charv\EchoRescue-pr8-preflight-local\.venv\Scripts\python.exe'
+$python = (Resolve-Path .venv/Scripts/python.exe).Path
 $env:PYTHONPATH = (Resolve-Path lidar/mapper/src).Path
 $env:OPENBLAS_NUM_THREADS = '1'
 $env:OMP_NUM_THREADS = '1'
@@ -65,7 +65,7 @@ Fresh tests (no unrelated lengthy bridge/perception suites rerun):
 node --test
 & $python -B -m pytest lidar/mapper/tests -q -ra
 $env:ECHO_PYTHON = $python
-$env:ECHO_PLAYWRIGHT_MODULE = 'C:\Users\charv\EchoRescue-pr8-preflight-local\.venv\browser\node_modules\playwright\index.mjs'
+$env:ECHO_PLAYWRIGHT_MODULE = (Resolve-Path .venv/browser/node_modules/playwright/index.mjs).Path
 node scripts/demo-reliability-smoke.mjs
 ```
 

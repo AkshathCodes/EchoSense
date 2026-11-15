@@ -71,8 +71,9 @@ plus the current frame.
 The viewer recognises these frames (`meta.kind: "lidar_map"`) through
 `src/mapper-adapter.js`: map points are coloured as floor, wall, ceiling or
 object, the live frame is drawn in orange-red, and **Room analysis** draws a
-labelled floor plan with each object's height. The classifier is geometric
-rules, tested on simulated rooms only. Add `--viewer-points 50000` to `serve`,
+labelled floor plan with each object's height. A trained surface forest runs
+locally in the viewer, with the geometric classifier as a fallback. The
+trained model has only been evaluated on simulated rooms. Add `--viewer-points 50000` to `serve`,
 `replay --serve` or `sim --serve` to send a denser map (the adapter accepts
 up to 60,000 points; the default stays at 20,000). `scripts/run-lidar.sh
 --mapper` from the repo root does all of this in one command.
@@ -95,7 +96,8 @@ cone. Where the sonar hears something clearly nearer than the LiDAR sees
 the viewer. Without `--sonar-port` nothing changes. Wiring, mounting, the
 alignment check and the exact rules: [hardware/hcsr04/README.md](../hardware/hcsr04/README.md).
 Code: `mapper/src/lidar_mapper/sonar.py`, tests in `mapper/tests/test_sonar.py`.
-Tested with simulated readings only (`sim --serve --sonar-sim`).
+Bench tested with a real HC-SR04 on Windows and synthetic LiDAR input. The
+combined real iPhone and HC-SR04 setup still needs an alignment test.
 
 ## Send scans to Databricks
 

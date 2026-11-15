@@ -437,6 +437,13 @@ el('connection-form').addEventListener('submit', event => {
       onStatus: status,
       onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
+        if (firstFrame && latest.mapper?.stale && livePoints?.length && frame.mapper &&
+            !frame.mapper.mapPoints && !frame.mapper.livePoints) {
+          const phase = frame.mapper.capture?.state ?? 'waiting';
+          set('connection-state', `Mapper connected / ${phase}`);
+          note.textContent = 'Showing last map (historical). Waiting for observations from the new mapper.';
+          return;
+        }
         if (firstFrame) {
           firstFrame = false;
           scanCameraBeforeSonar ??= savedMap ? scanSettings.camera : viewer?.camera();

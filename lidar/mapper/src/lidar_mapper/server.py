@@ -63,13 +63,15 @@ class LiveMapper:
             raise ValueError("capture_stall_s must be finite and positive")
         self.capture_stall_s = capture_stall_s
         self.last_ingested_at: float | None = None  # Host monotonic seconds, never phone timestamps.
-        self.phone_connections = 0
+        self._next_phone = 0
+        self._phones: set[int] = set()
+        self._capture_phone: int | None = None
         self.capture_complete = False
         self._acquisitions: set[str] = set()
         self.mapper = mapper
         self.view = view
         self.lock = threading.Lock()
-        self.latest: bytes | None = None
+        self.latest: tuple[int, bytes] | None = None
         self.event = asyncio.Event()
         self.frame_points = np.zeros((0, 3))
         self.last = None
@@ -87,7 +89,9 @@ class LiveMapper:
     async def phone_handler(self, conn) -> None:
         peer = conn.remote_address
         with self.lock:
-            self.phone_connections += 1
+            self._next_phone += 1
+            phone = self._next_phone
+            self._phones.add(phone)
         print(f"[phone] connected {peer}")
         try:
             async for msg in conn:
@@ -98,19 +102,22 @@ class LiveMapper:
                     write_record(self.record_fh, msg)
                 if self.latest is not None:
                     self.dropped += 1
-                self.latest = msg
+                self.latest = (phone, msg)
                 self.event.set()
         except ConnectionClosed:
             pass
         finally:
             with self.lock:
-                self.phone_connections -= 1
+                self._phones.remove(phone)
         print(f"[phone] disconnected {peer}")
 
-    def ingest(self, msg: bytes):
+    def ingest(self, msg: bytes, phone: int | None = None):
         """Decode + map one message (runs in a worker thread)."""
         f = protocol.decode(msg)
         with self.lock:
+            if phone is not None and phone not in self._phones:
+                self.dropped += 1
+                return
             r = self.mapper.process(f)
             # Raw recordings retain the acquisition source in each depth-frame header.
             # Unknown legacy sources must never be inferred to be live phone data.
@@ -128,6 +135,7 @@ class LiveMapper:
             self.last = (f, r)
             self.mapped += 1
             self.last_ingested_at = time.monotonic()
+            self._capture_phone = phone
             self.capture_complete = False
         return f, r
 
@@ -144,8 +152,10 @@ class LiveMapper:
             "live" if self.acquisition_source == "live" else "unknown")
         if self.capture_complete and self.delivery != "live":
             state = "complete"
-        elif self.delivery == "live" and not self.phone_connections:
+        elif self.delivery == "live" and not self._phones:
             state = "disconnected"
+        elif self.delivery == "live" and self._capture_phone not in self._phones:
+            state, age = "waiting", None
         elif age is None:
             state = "waiting"
         else:
@@ -164,11 +174,12 @@ class LiveMapper:
         while True:
             await self.event.wait()
             self.event.clear()
-            msg, self.latest = self.latest, None
-            if msg is None:
+            pending, self.latest = self.latest, None
+            if pending is None:
                 continue
             try:
-                await asyncio.to_thread(self.ingest, msg)
+                phone, msg = pending
+                await asyncio.to_thread(self.ingest, msg, phone)
             except Exception as e:  # bad frame: count it, keep going
                 self.bad += 1
                 if self.bad <= 5:

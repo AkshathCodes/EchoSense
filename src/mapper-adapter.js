@@ -39,6 +39,8 @@ export function readCaptureStatus(raw) {
       !['waiting', 'active', 'stalled', 'disconnected', 'complete'].includes(raw.state) ||
       !(raw.age_s === null || typeof raw.age_s === 'number' && Number.isFinite(raw.age_s) && raw.age_s >= 0) ||
       typeof raw.stall_after_s !== 'number' || !Number.isFinite(raw.stall_after_s) || raw.stall_after_s <= 0) return null;
+  // The mapper rounds age to milliseconds before sending it.
+  if (raw.state === 'active' && (raw.age_s === null || raw.age_s > raw.stall_after_s + 0.001)) return null;
   return { mode: raw.mode, state: raw.state, age_s: raw.age_s, stall_after_s: raw.stall_after_s };
 }
 
@@ -195,7 +197,7 @@ export function createMapperSession({ classify = analyseLidar } = {}) {
         sonar: { delivery, acquisition, detectionCount: null },
         mapper: { mapPoints: mapCount, livePoints: liveCount, objects: report.objects.length,
           simulated: acquisition === 'simulated', analysis: report, floorArea: report.floorArea, roomHeight: report.roomHeight, sonar,
-          delivery, acquisition, capture, stale: Boolean(capture && ['stalled', 'disconnected', 'complete'].includes(capture.state)),
+          delivery, acquisition, capture, stale: Boolean(capture && capture.state !== 'active' && rows.length),
           sonarSurface: surface } };
     },
   };

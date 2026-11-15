@@ -24,10 +24,10 @@ def test_successful_ingestion_not_snapshot_frequency_controls_stall_and_resume(m
     clock = [100.0]
     monkeypatch.setattr("lidar_mapper.server.time.monotonic", lambda: clock[0])
     live = LiveMapper(Mapper(), view="map")
-    live.phone_connections = 1  # Synthetic connected transport fixture.
+    live._phones.add(1)  # Synthetic connected transport fixture.
     assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "waiting"
     message = protocol.encode(replace(frame, source="lidar"))  # Test source-header semantics only.
-    live.ingest(message)
+    live.ingest(message, phone=1)
     first = snapshot(live)
     assert first["frame"]["meta"]["capture"] == {
         "mode": "live", "state": "active", "age_s": 0.0, "stall_after_s": 3.0}
@@ -43,9 +43,9 @@ def test_successful_ingestion_not_snapshot_frequency_controls_stall_and_resume(m
         live.ingest(b"not a depth frame")
     assert live.last_ingested_at == 100.0
     clock[0] = 105.0
-    live.ingest(message)
+    live.ingest(message, phone=1)
     assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "active"
-    live.phone_connections = 0
+    live._phones.clear()
     assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "disconnected"
 
 
@@ -58,8 +58,9 @@ def test_capture_mode_never_promotes_simulation_or_replay_to_phone(monkeypatch, 
     clock = [10.0]
     monkeypatch.setattr("lidar_mapper.server.time.monotonic", lambda: clock[0])
     live = LiveMapper(Mapper(), delivery=delivery, capture_stall_s=5)
-    live.phone_connections = 1
-    live.ingest(protocol.encode(replace(frame, source=source)))
+    if delivery == "live":
+        live._phones.add(1)
+    live.ingest(protocol.encode(replace(frame, source=source)), phone=1 if delivery == "live" else None)
     assert snapshot(live)["frame"]["meta"]["capture"]["mode"] == mode
     if delivery != "live":
         live.finish_capture()
@@ -95,13 +96,50 @@ def test_phone_connection_lifecycle_without_hardware():
         async with serve(live.phone_handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
             async with connect(f"ws://127.0.0.1:{port}/depth"):
-                assert live.phone_connections == 1
                 assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "waiting"
             for _ in range(100):
-                if live.phone_connections == 0:
+                if snapshot(live)["frame"]["meta"]["capture"]["state"] == "disconnected":
                     break
                 await asyncio.sleep(0.01)
             assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "disconnected"
+    asyncio.run(exchange())
+
+
+def test_reconnected_phone_requires_its_own_successful_depth(frame):
+    from websockets.asyncio.client import connect
+    from websockets.asyncio.server import serve
+
+    async def exchange():
+        live = LiveMapper(Mapper(), view="map", verbose=False, capture_stall_s=30)
+
+        async def wait_for(state):
+            async def until():
+                while snapshot(live)["frame"]["meta"]["capture"]["state"] != state:
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(until(), 5)
+
+        async with serve(live.phone_handler, "127.0.0.1", 0) as server:
+            url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/depth"
+            worker = asyncio.create_task(live.worker())
+            try:
+                async with connect(url) as phone:
+                    await phone.send(protocol.encode(replace(frame, source="lidar")))
+                    await wait_for("active")
+                await wait_for("disconnected")
+                previous = snapshot(live)["frame"]["points"]
+                assert previous
+                async with connect(url) as phone:
+                    capture = snapshot(live)["frame"]["meta"]["capture"]
+                    assert capture["state"] == "waiting" and capture["age_s"] is None
+                    # Work left in the previous socket's queue cannot reactivate capture.
+                    live.ingest(protocol.encode(replace(frame, source="lidar", seq=1)), phone=1)
+                    assert snapshot(live)["frame"]["meta"]["capture"]["state"] == "waiting"
+                    assert snapshot(live)["frame"]["points"] == previous
+                    await phone.send(protocol.encode(replace(frame, source="lidar", seq=1)))
+                    await wait_for("active")
+            finally:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
     asyncio.run(exchange())
 
 

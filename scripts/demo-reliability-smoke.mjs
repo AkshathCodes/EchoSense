@@ -252,6 +252,14 @@ try {
   check('connecting preserves historical map', /historical/.test(await page.locator('#source').innerText()));
   await waitUntil(async () => /lost|failed/i.test(await page.locator('#connection-state').innerText()), 'failed reconnect', 15000);
   check('failed reconnect preserves historical map', /historical/.test(await page.locator('#source').innerText()));
+  const beforeEmpty = frames, retainedVertices = await page.locator('#vertices').innerText();
+  await startMapper(['serve']); // A restarted mapper without a phone publishes empty snapshots.
+  await connect();
+  await waitUntil(() => frames > beforeEmpty + 2 && !lastFrame.frame.points.length, 'empty replacement mapper snapshots');
+  check('empty replacement mapper preserves observed historical map',
+    /historical/.test(await page.locator('#source').innerText()) &&
+    await page.locator('#vertices').innerText() === retainedVertices);
+  await disconnectCheck('empty replacement mapper loss');
   const previousFrames = frames;
   await startMapper(['sim', '--frames', '8', '--serve', '--sonar-sim']);
   await connect();
