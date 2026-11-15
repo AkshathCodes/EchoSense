@@ -6,7 +6,8 @@ const coordinates = values => values.every(n => Number.isFinite(n) && Math.abs(n
 // Forward points toward -Z in the viewer; left points toward -X; up is +Y.
 const toViewer = ([forward, left, up]) => [-left, up, -forward];
 
-export function sonarLabel({ delivery, acquisition }) {
+export function sonarLabel({ delivery, acquisition, modality }) {
+  if (modality === 'lidar') return delivery === 'recorded' ? 'LiDAR replay' : 'Live LiDAR';
   if (delivery === 'recorded') return acquisition === 'simulated' ? 'Sonar replay · simulated' : 'Sonar replay';
   return acquisition === 'simulated' || delivery === 'simulated' ? 'Simulated sonar' : 'Live sonar';
 }
@@ -36,6 +37,11 @@ export async function decodeSocketFrame(payload) {
     points.set(toViewer(row), i * 3);
     snr += row[3] / rows.length;
   }
+  // The iPhone app sets these. Sonar frames leave them out.
+  const meta = raw.frame.meta ?? {};
+  const modality = meta.modality === 'lidar' ? 'lidar' : 'sonar';
+  const reference = meta.reference === 'world' ? 'world' : 'sensor';
+  const tracking = typeof meta.tracking === 'string' ? meta.tracking : null;
   let target = null;
   if (document !== null) {
     if (document?.format_version !== '0.1' || !Array.isArray(document.detections) ||
@@ -50,5 +56,6 @@ export async function decodeSocketFrame(payload) {
     }
   }
   return { points, target, frame: sequence, captureTime: timestamp, snr: rows.length ? snr : null,
-    sonar: { delivery, acquisition, detectionCount: document?.detections.length ?? null } };
+    sonar: { delivery, acquisition, modality, reference, tracking,
+      detectionCount: document?.detections.length ?? null } };
 }

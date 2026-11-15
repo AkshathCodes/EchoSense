@@ -38,3 +38,16 @@ test('rejects incompatible bridge versions and invalid points, accepts preview f
   const preview = await decodeSocketFrame('{"points":[[1,2,3]]}');
   assert.deepEqual([...preview.points], [1, 2, 3]);
 });
+
+test('LiDAR frames from the phone relay carry their modality and reference frame', async () => {
+  const result = await decodeSocketFrame(JSON.stringify({ ...message, source: 'live', acquisition_source: 'live',
+    frame: { format_version: '0.2', points: [[1.5, 0.5, -0.2, 2], [1.5, -0.5, -0.2, 1]],
+      meta: { modality: 'lidar', reference: 'world', tracking: 'normal' } }, detections: null }));
+  assert.deepEqual([...result.points].map(n => +n.toFixed(2)), [-0.5, -0.2, -1.5, 0.5, -0.2, -1.5]);
+  assert.equal(result.snr, 1.5);
+  assert.equal(result.sonar.modality, 'lidar');
+  assert.equal(result.sonar.reference, 'world');
+  assert.equal(sonarLabel(result.sonar), 'Live LiDAR');
+  const sonar = await decodeSocketFrame(JSON.stringify(message));
+  assert.equal(sonar.sonar.modality, 'sonar');
+});

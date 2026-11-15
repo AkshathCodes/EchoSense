@@ -184,6 +184,7 @@ function showScanSource() {
   source.toggleAttribute('data-live', live && sonar?.acquisition !== 'simulated');
   writeSource(!live ? 'Mock data' : sonar ? sonarLabel(sonar) : 'Socket data');
   set('study', !live ? 'Living room / sample scan'
+    : sonar?.modality === 'lidar' ? sonar.reference === 'world' ? 'LiDAR · Room map' : 'LiDAR · Phone-relative scan'
     : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
 }
 
@@ -204,10 +205,10 @@ function applyFrame(frame, force = false) {
 function status(state) {
   const messages = {
     connecting: ['Connecting…', 'Opening the WebSocket.'],
-    connected: ['Connected', 'Waiting for a sonar frame.'],
+    connected: ['Connected', 'Waiting for a frame from the bridge.'],
     error: ['Connection failed', 'Check the bridge URL, server, and allowed browser origin.'],
     complete: ['Replay complete', 'Showing the last recorded frame. Connect to replay again.'],
-    disconnected: ['Local preview', 'Start the sonar bridge, then connect.'],
+    disconnected: ['Local preview', 'Start the bridge, then connect.'],
   };
   connection.dataset.status = state;
   [connection.textContent, note.textContent] = messages[state];
@@ -438,8 +439,11 @@ function render(time) {
     const vertexCount = mode.value === 'mesh' && viewer.hasMesh ? viewer.meshCount : viewer.count;
     set('vertices', numbers.format(Math.min(vertexCount, pointLimit)));
     set('frame', sample.frame ?? '—');
-    set('signal-label', sample.sonar ? 'Mean SNR' : 'Latency');
-    set('latency', sample.sonar ? sample.snr == null ? '—' : `${sample.snr.toFixed(1)}×`
+    const lidar = sample.sonar?.modality === 'lidar';
+    // LiDAR intensity is ARKit depth confidence, 0 to 2.
+    set('signal-label', lidar ? 'Depth confidence' : sample.sonar ? 'Mean SNR' : 'Latency');
+    set('latency', sample.sonar ? sample.snr == null ? '—'
+      : lidar ? `${Math.round(sample.snr * 50)}%` : `${sample.snr.toFixed(1)}×`
       : sample.latencyMs === undefined ? '—' : `${Math.round(sample.latencyMs)} ms`);
     el('capture-clock').hidden = !sample.sonar;
     set('capture-time', sample.captureTime === undefined ? '—' : `${sample.captureTime.toFixed(2)} s`);

@@ -120,3 +120,42 @@ Archive: `C:/Users/charv/Downloads/madhacks-sonar-main.zip`, prefix
 - `perception/src/sonar_perception/sources/recorded.py`
 
 This workspace changes none of these contracts or source files.
+
+## Live LiDAR relay (`--lidar`), added Nov 14
+
+`python -m sonar_bridge --lidar` replaces the per-client replay with a relay.
+Differences from everything above:
+
+- Binds `0.0.0.0` (override with `--host`) so a phone on the LAN can connect.
+  No TLS and no authentication.
+- `ws://<laptop>:8765/ingest`: one producer at a time, must send no `Origin`
+  header (native app). A second producer is closed with 1013.
+- `/ws`: same Origin allowlist as before. Every viewer gets the same newest
+  frame. A viewer that connects late gets the last frame immediately. A slow
+  viewer skips frames. `sequence` counts frames accepted from the phone and
+  is shared by all viewers.
+- A phone message that fails validation is dropped and counted; the
+  connection stays open.
+
+Phone message, one JSON text frame each:
+
+```json
+{"type":"lidar_frame","version":"0.1","timestamp":51234.50,
+ "sensor_id":"iphone-lidar","tracking":"normal","reference":"sensor",
+ "points":[[1.20,-0.05,0.00,2]]}
+```
+
+- `points`: `[x,y,z,confidence]`, same axes as sonar (X forward, Y left, Z up,
+  meters). `confidence` is ARKit depth confidence 0, 1 or 2. It travels in the
+  intensity slot and is not an SNR. Same 20,000 point and 2 MB limits.
+- `reference`: `sensor` means relative to the phone for this frame, leveled
+  with gravity. `world` means accumulated in the ARKit session frame (origin
+  at the phone's starting position).
+- `tracking`: `normal`, `limited` or `not_available`.
+- `timestamp`: ARKit frame time in seconds since device boot.
+
+The bridge wraps it in the unchanged 0.1 `sonar_frame` envelope with
+`source` and `acquisition_source` both `live`, `detections: null`, and
+`frame.meta` = `{format_version:"0.2", source:"live", sensor_id, tilt_deg:0,
+modality:"lidar", tracking, reference}`. Viewers tell LiDAR from sonar by
+`frame.meta.modality`.
