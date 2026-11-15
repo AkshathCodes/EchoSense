@@ -38,11 +38,36 @@ is what the LiDAR cannot do, and why the two are worth combining.
 ## Parts
 
 - HC-SR04 module (4 pins: VCC, Trig, Echo, GND)
-- ESP32 dev board (what the team has) or an Arduino Uno or Nano, with a USB
-  **data** cable to the Mac. Many micro-USB cables are charge-only.
-- Breadboard and jumper wires
-- 4 wires, 40 to 50 cm, from the sensor on the phone to the board
-- For the ESP32: one 1 kΩ and one 2 kΩ resistor (or the substitutes below)
+- A microcontroller board with a USB **data** cable to the laptop. The team
+  uses a Seeed XIAO nRF52840 Sense. An ESP32 dev board or an Arduino Uno or
+  Nano also works. Many USB cables are charge-only.
+- Breadboard and three jumper wires
+- For the XIAO or ESP32: 10 kΩ and 15 kΩ resistors (1% tolerance), or a
+  5 V to 3.3 V logic level shifter. The classic 5 V Arduino Uno and Nano
+  can receive the sensor's ECHO signal directly.
+
+## XIAO on a breadboard
+
+This is a proposed breadboard layout. PR #11 verified serial distance readings
+with D6 and D5 on a XIAO nRF52840 Sense; it did not document the exact resistor
+values or breadboard layout. Use the printed pin names and
+[Seeed's pinout](https://wiki.seeedstudio.com/XIAO_BLE/#hardware-overview).
+
+A breadboard's five holes in each short row are joined, so every pin needs a
+row of its own. Unplug USB before wiring.
+
+1. Place the XIAO across the center gap. Place the sensor with one pin per row.
+2. Connect **ECHO** through **10 kΩ** to **D5**, and connect **D5** through
+   **15 kΩ** to **GND**.
+3. Connect **TRIG** to **D6**, **VCC** to the XIAO **5V** pin, and **GND** to
+   the XIAO **GND** pin.
+
+The divider produces about 3.0 V from a 5.0 V echo. Three equal resistors
+produce about 3.33 V at nominal USB voltage and can exceed the
+[GPIO operating range](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/gpio.html).
+Before connecting D5, test the divider by temporarily applying the sensor's
+5V rail in place of ECHO and checking that the divider output stays below
+the board's 3V3 rail. Disconnect the test lead before restoring ECHO.
 
 ## Seeed Studio XIAO build, soldered, no breadboard
 
@@ -50,8 +75,9 @@ This assumes a **Seeed Studio XIAO** (ESP32C3, ESP32S3, RP2040, SAMD21 or
 nRF52840). All of them use 3.3 V pins, so the Echo divider is still needed.
 A 5 V Seeeduino wires like the Arduino table further down instead.
 
-Team build: XIAO nRF52840 on a 3 x 7 cm perfboard, sensor soldered to the
-same board just below it. Hold the board with the USB-C socket at the top and
+Earlier plan, kept for a permanent build: XIAO nRF52840 on a 3 x 7 cm
+perfboard, sensor soldered to the same board just below it. This layout has
+not been built. Hold the board with the USB-C socket at the top and
 the XIAO's label facing you. Pads from the USB end: left side D0, D1, D2, D3,
 D4, D5, D6; right side 5V, GND, 3V3, D10, D9, D8, D7.
 
@@ -61,7 +87,7 @@ D4, D5, D6; right side 5V, GND, 3V3, D10, D9, D8, D7.
 | Gnd | **GND**, right side, 2nd pad | Jumper, about 5 cm. Run it on the back of the board |
 | Trig | **D6**, left side, 7th (last) pad | Short jumper or a clipped resistor leg |
 | Echo | **D5**, left side, 6th pad, through 1 kΩ | The resistor is the connection |
-| | D5 to sensor Gnd pin through 2 kΩ | The resistor is the connection |
+| | D5 to sensor Gnd pin through 1.5 kΩ | The resistor is the connection |
 
 Never wire Echo straight to a pad: the sensor drives it at 5 V.
 
@@ -78,20 +104,21 @@ Order of work:
 
 1. Solder the four sensor pins into their holes.
 2. 1 kΩ: one leg to the Echo pin's hole, the other leg to D5.
-3. 2 kΩ: one leg to D5 (same joint), the other leg to the sensor Gnd pin.
+3. 1.5 kΩ: one leg to D5 (same joint), the other leg to the sensor Gnd pin.
 4. Trig pin to D6 with a clipped leg or a short piece of wire.
 5. Vcc pin to the 5V pad. Keep this jumper off the other right-side pads.
 6. Gnd pin to the GND pad, with the jumper on the back of the board, taped
    down, clear of the two rows of XIAO pad holes except where it lands.
 7. Multimeter: 5V to GND must not beep. Echo pin to D5 about 1 kΩ. D5 to GND
-   about 2 kΩ.
+   about 1.5 kΩ.
 
 Bare wire is acceptable only where it cannot touch another joint. Anything
 insulated is safer: strands from a spare USB or Ethernet cable work well.
 
 Flash it: in the Arduino IDE add Seeed's board package for your XIAO model,
 select the board and port, open `hcsr04.ino`, Upload. If the port does not
-appear, hold the tiny **B** (boot) button while plugging in USB. Open the
+appear, hold the tiny **B** (boot) button while plugging in USB (on the
+nRF52840, double-tap the reset button instead). Open the
 Serial Monitor at 115200. The first line names the pins the sketch chose,
 then readings. If that first line says `trig pin 9 echo pin 10`, the sketch
 did not recognise the board: uncomment `#define SEEED_XIAO` at the top and
@@ -117,12 +144,10 @@ sketch.
    to trigger the sensor.
 5. Sensor **Echo** to an empty breadboard row. From that row, a **1 kΩ**
    resistor to a second empty row. From the second row, a wire to **GPIO 27**
-   and a **2 kΩ** resistor to **GND**. GPIO 27 now sees 3.3 V instead of 5 V.
+   and a **1.5 kΩ** resistor to **GND**. GPIO 27 sees about 3.0 V at a 5.0 V echo.
 
-No 1 kΩ and 2 kΩ? Any pair where the resistor to GND is about twice the other
-works: 2.2 kΩ and 4.7 kΩ, 10 kΩ and 20 kΩ, or three equal resistors (one from
-Echo, two in series to GND). Check with a multimeter if you have one: with
-the sensor powered, the GPIO 27 row should never read above 3.3 V.
+The 10 kΩ / 15 kΩ pair above also works at the same nominal ratio. Use the
+same static voltage check before connecting GPIO 27.
 
 Do not connect Echo straight to an ESP32 pin. It may work for a while and
 then damage the pin.
@@ -179,12 +204,12 @@ HC-SR04 GND  -> board GND
 HC-SR04 Trig -> board GPIO (3.3 V is enough to trigger it)
 HC-SR04 Echo -> 1 kΩ -> board GPIO
                         |
-                       2 kΩ
+                     1.5 kΩ
                         |
                        GND
 ```
 
-The GPIO sees 5 V x 2/3 = 3.3 V. On an ESP32 the sketch already uses GPIO 26
+The GPIO sees about 3.0 V at a 5.0 V echo. On an ESP32 the sketch already uses GPIO 26
 (Trig) and 27 (Echo). On another board, change `TRIG_PIN` and `ECHO_PIN`. Modules marked HC-SR04P or "3-5.5 V"
 can run from 3.3 V directly, with no resistors.
 

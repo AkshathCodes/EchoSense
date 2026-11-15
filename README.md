@@ -51,7 +51,8 @@ the last observed map as historical and marks current sonar readings unavailable
 With an HC-SR04 strapped to the phone ([guide](hardware/hcsr04/README.md)),
 `SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper` adds a sonar
 cross-check: the viewer shows the sonar and LiDAR distances side by side and
-marks, in magenta, surfaces only the sonar can detect, such as glass.
+marks possible sonar-only surfaces in magenta. Reflections from glass can
+produce this result, but the marker does not identify the material.
 `SONAR_SIM=1 scripts/run-lidar.sh --mapper-sim` shows it with simulated
 readings. The HC-SR04 and XIAO nRF52840 Sense passed a Windows serial bench
 test with a synthetic LiDAR publisher. Combined operation with a real iPhone
