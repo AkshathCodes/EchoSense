@@ -165,3 +165,43 @@ def encode_sonar_frame(frame: Any, sequence: int, detections_document: Any = Non
         points = points.tolist()
     return encode_frame(points=points, timestamp=frame.timestamp, meta=frame.meta,
                         sequence=sequence, detections=detections_document, replay=replay)
+
+
+TRACKING = ("normal", "limited", "not_available")
+REFERENCES = ("sensor", "world")
+
+
+def encode_lidar_ingest(raw: str | bytes, sequence: int) -> str:
+    """Wrap one phone `lidar_frame` message in the viewer envelope.
+
+    The phone already sends X forward / Y left / Z up meters. Intensity is the
+    ARKit depth confidence (0 low, 1 medium, 2 high), not a sonar SNR.
+    `reference` says whether points are relative to the phone for this frame
+    ("sensor") or accumulated in the ARKit session frame ("world").
+    """
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        message = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("ingest message must be JSON") from exc
+    allowed = {"type", "version", "timestamp", "sensor_id", "tracking", "reference", "points"}
+    if type(message) is not dict or message.keys() - allowed:
+        raise ValueError("unexpected ingest fields")
+    if message.get("type") != "lidar_frame" or message.get("version") != "0.1":
+        raise ValueError("expected lidar_frame 0.1")
+    sensor_id = message.get("sensor_id", "iphone-lidar")
+    if type(sensor_id) is not str or not 0 < len(sensor_id) <= 64:
+        raise ValueError("sensor_id must be short text")
+    tracking = message.get("tracking", "not_available")
+    reference = message.get("reference", "sensor")
+    if tracking not in TRACKING or reference not in REFERENCES:
+        raise ValueError("unknown tracking state or reference frame")
+    points = message.get("points")
+    validate_points(points)
+    if any(point[3] > 2 for point in points):
+        raise ValueError("LiDAR confidence must be 0, 1 or 2")
+    meta = {"format_version": "0.2", "source": "live", "sensor_id": sensor_id, "tilt_deg": 0.0,
+            "modality": "lidar", "tracking": tracking, "reference": reference}
+    return encode_frame(points=points, timestamp=number(message.get("timestamp"), "timestamp"),
+                        meta=meta, sequence=sequence, detections=None)

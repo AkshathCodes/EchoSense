@@ -3,6 +3,11 @@
 An interactive room scan viewer for the EchoSense headset project. The UI
 starts with **Mock data**, a modeled living room and simulated sensor readings.
 
+> **Sensor change (Nov 14):** the sonar hardware is no longer available. The
+> live sensor is now an iPhone's LiDAR scanner. See
+> [iPhone LiDAR](#iphone-lidar-live-sensor). The sonar simulation, ML and
+> acoustic scanner remain in the repo and still run on simulated data.
+
 ## Run locally
 
 Use Node.js 20 or later.
@@ -78,6 +83,33 @@ The images provide no scale or measured scan. The model assumes an
 modeled from visible silhouettes and relationships, with rounded cushions,
 shelves, individual books, and a lamp. Front and left walls are open for the
 cutaway. The wireframe and points are generated from surfaces at startup.
+
+## iPhone LiDAR (live sensor)
+
+`ios/` holds a SwiftUI app that reads the iPhone LiDAR depth map and pushes
+points to the bridge, which relays them to this viewer.
+
+```
+iPhone app  --ws /ingest-->  websocket-bridge --lidar  --ws /ws-->  viewer
+```
+
+```sh
+node serve.js
+cd websocket-bridge
+python -m venv .venv && .venv/bin/pip install -e .
+.venv/bin/python -B -m sonar_bridge --lidar --origin http://127.0.0.1:4173
+```
+
+Build the app from `ios/EchoSenseLiDAR.xcodeproj`, enter the address the
+bridge prints, then click **Connect** in the viewer. The source badge reads
+**Live LiDAR**. The study line reads "Phone-relative scan" in Live mode and
+"Room map" when the phone sends its accumulated map. The signal readout shows
+mean ARKit depth confidence. Build steps, the two modes, and what does and
+does not work in a dark room are in [ios/README.md](ios/README.md). To drive
+the viewer without a phone, run `python -B fake_phone.py` in
+`websocket-bridge/`.
+
+The app has not been compiled yet; it was written on a machine without Xcode.
 
 ## Backend handoff
 

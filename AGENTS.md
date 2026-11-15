@@ -7,6 +7,8 @@ for the area you're changing before you change it.
 |---|---|---|---|
 | repo root (`index.html`, `src/`, `serve.js`, `test/`) | Web scan viewer and saved maps (Node 20+, no packages) | viewer team | [README.md](README.md) |
 | [`acoustic/`](acoustic/) | Audible-chirp laptop scanner, Databricks scan aggregation | Ryan | [README.md](README.md) "Acoustic Scan and Databricks" |
+| [`ios/`](ios/) | iPhone LiDAR app, the live sensor since the sonar hardware fell through (Swift, not yet compiled) | Ryan | [ios/README.md](ios/README.md) |
+| [`websocket-bridge/`](websocket-bridge/) | Python WebSocket bridge: replay, and `--lidar` phone relay | bridge team | [websocket-bridge/PROTOCOL.md](websocket-bridge/PROTOCOL.md) |
 | [`sonar-ml/`](sonar-ml/) | Python sonar simulation, 3D mapping, segmentation, classification; research, decisions (ADRs), logs, hardware/firmware requirements | Rishi | [sonar-ml/AGENTS.md](sonar-ml/AGENTS.md), then [sonar-ml/docs/status.md](sonar-ml/docs/status.md) |
 
 ## Rules
