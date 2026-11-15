@@ -214,22 +214,45 @@ class SonarFusion:
 
 
 class SerialSonar(threading.Thread):
-    """Reads distance lines from the microcontroller and feeds a SonarFusion. Needs pyserial."""
+    """Reads distance lines from the microcontroller and feeds a SonarFusion. Needs pyserial.
+
+    A loose USB cable is normal on a hand-held rig, so a failed read is not fatal: the port is
+    reopened every second until the board is back. Meanwhile the status is no_sonar.
+    """
 
     def __init__(self, fusion: SonarFusion, port: str, baud: int = 115200) -> None:
         super().__init__(daemon=True)
         import serial  # imported here so the mapper runs without pyserial when no sonar is used
+        self._serial = serial
         self.fusion = fusion
+        self.port, self.baud = port, baud
         self.link = serial.Serial(port, baud, timeout=1)
         self.bad = 0
+        self.reconnects = 0
+
+    def _reopen(self) -> None:
+        try:
+            self.link.close()
+        except Exception:
+            pass
+        while True:
+            time.sleep(1.0)
+            try:
+                self.link = self._serial.Serial(self.port, self.baud, timeout=1)
+                self.reconnects += 1
+                print(f"[sonar] reconnected to {self.port}", flush=True)
+                return
+            except Exception:
+                continue
 
     def run(self) -> None:
         while True:
             try:
                 raw = self.link.readline()
-            except Exception as exc:  # unplugged cable: stop quietly, the status goes to no_sonar
-                print(f"[sonar] serial read failed: {exc}")
-                return
+            except Exception as exc:  # unplugged or wobbly cable: keep trying
+                print(f"[sonar] serial read failed ({exc}); waiting for {self.port} to come back", flush=True)
+                self._reopen()
+                continue
             if not raw:
                 continue
             try:
