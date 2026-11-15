@@ -14,7 +14,9 @@ for the area you're changing before you change it.
 
 ## Rules
 - Stay in your area; changes to another area go through its owner.
-- No unilateral pushes or merges to `main`. Work on a branch and coordinate before integrating.
+- No unilateral pushes or merges to `main`. Branch from `develop` as `<area>/<short-name>`
+  (`ios/`, `bridge/`, `viewer/`, `memory/`), open a pull request into `develop`, and tell the
+  team before `develop` goes to `main`.
 - The LiDAR schema and coordinate rules change in `LIDAR_PROTOCOL.md` first, announced to the team.
 - Synthetic data stays labeled synthetic. Only real ARKit measurements are called real LiDAR.
 - `main` should pass all suites: `node --test` (root),

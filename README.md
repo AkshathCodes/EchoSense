@@ -13,92 +13,23 @@ iPhone Pro LiDAR -> ARKit app (ios-lidar/) -> Wi-Fi -> Python bridge (websocket-
   -> 3D viewer (src/) -> spatial memory, coverage map, audio cues
 ```
 
-| Area | Owner |
-|---|---|
-| `ios-lidar/` iPhone app | Rishi |
-| `websocket-bridge/` bridge, [LiDAR protocol](websocket-bridge/LIDAR_PROTOCOL.md), record and replay | Charvik |
-| `src/`, `index.html` viewer and LiDAR rendering | Akshath |
-| `src/spatial-memory.js`, `src/audio-cues.js`, [demo plan](docs/DEMO.md) | Ryan |
+## Quick start
 
-The UI starts with **Mock data**, a modeled living room. The earlier sonar
-simulation, ML and acoustic scanner are still in the repo and still run on
-simulated data only.
+Needs Node 20+, Python 3.11+ (macOS ships 3.9: `brew install python@3.12`),
+and for a real scan an iPhone Pro with the app from `ios-lidar/`.
 
-## Run locally
-
-Use Node.js 20 or later.
+On macOS or Linux, one command sets up the bridge and starts everything:
 
 ```sh
-node serve.js
+scripts/run-lidar.sh                 # viewer + live bridge, records to recordings/
+scripts/run-lidar.sh --fake          # same, plus the SYNTHETIC phone (no iPhone needed)
+scripts/run-lidar.sh --replay recordings/<file>.jsonl
 ```
 
-Open `http://127.0.0.1:4173/` in a WebGL-capable browser. There are no packages
-to install. Stop the static development server with Ctrl+C.
+Then open `http://127.0.0.1:4173/` and click **Connect**. On Windows, or to
+run the pieces by hand, see [LiDAR spatial memory](#lidar-spatial-memory).
 
-## Viewer controls
-
-- **Orbit / Camera / Top** switch between a cutaway, eye-height view, and
-  overhead view. Drag to orbit, Shift-drag or right-drag to pan, and scroll
-  to zoom. In Top view, dragging pans. On a touchscreen, pinch to zoom.
-- With the canvas focused, use arrow keys to rotate, Shift + arrows to pan,
-  + and − to zoom, and 0 to reset the current view.
-- **Render mode** switches between cyan points, natural-color points, and
-  triangular wireframe. The wireframe has cyan, ice, and height-based tints.
-- **Max vertices** caps the rendered points or line vertices. **Point size**
-  adjusts points only. **Frame skip** skips geometry uploads in socket mode
-  while retaining telemetry on the preview fixture. For sonar, it skips
-  whole frames so detections stay paired with their own point cloud. In
-  mock mode it slows telemetry refresh.
-- **Grid** draws a one-meter coordinate grid. **RF rings** shows three
-  simulated anchors and their coverage rings. The amber outline shows the
-  estimated zone when the source supplies an estimate above the UI threshold.
-- **Height slice** shows a 44 cm band centered at the selected height.
-  **Estimate trail** shows recent confident estimates and leaves gaps when
-  the estimate was missing. The trail is disabled for sonar frames because
-  the bridge supplies sensor-relative positions. **Camera** adds a heading
-  and overhead map.
-
-## Saved Maps
-
-Open **Saved Maps** to find two labeled mock scans of the same room. The
-second pass includes returns that the first missed near the chair and
-bookcase. Select both thumbnails' **Compare** checkboxes and choose
-**Compare** to open the synchronized cameras. **Change overlay** uses
-0.25 m cells to highlight returns in the later scan that have no matching
-cell in the earlier scan. Gray returns do not establish that a surface was
-removed or that an unobserved area was clear. The overlay is available only
-for scans with a shared coordinate frame. The current socket decoder has
-no alignment metadata, so live captures can be viewed side by side with the
-overlay disabled.
-
-Use **Save snapshot** in the scanner to capture the current geometry,
-telemetry and thumbnail. The library supports renaming, deleting, and
-filtering by name or data source. Selecting a thumbnail reopens that map
-in the scanner. Use **Replay** or scrub the timeline to see the stored
-frames and estimate gaps. The two demo maps show a synthetic scan build;
-new snapshots retain the most recent 12 one-second samples plus the
-capture frame. A snapshot with just one frame still opens in the viewer.
-
-The archive uses IndexedDB in this browser, scoped to the address and port.
-Reloading the same URL keeps the maps. Clearing this site's browser data
-removes them. Maps are not synced or uploaded. The scanner on the Scan
-tab keeps receiving socket messages while a saved map is open.
-
-## Geometry and reference choices
-
-The references use several rendering styles and show different interiors. The
-default scene follows the cyan living-room cutaway: two exposed walls, a
-doorway on the left, framed picture and three-seat couch, low open-shelf table
-in front, window on the right, then an armchair and bookcase. The eye-height
-wireframe uses triangulated surfaces, with a partial ceiling and bright
-edges. Natural color and RF/grid layers come from the corresponding reference
-images. The compact upper-right controls follow the point-cloud viewer panel.
-
-The images provide no scale or measured scan. The model assumes an
-8.6 × 6.4 × 3.15 m room and uses Y-up coordinates in meters. Furniture is
-modeled from visible silhouettes and relationships, with rounded cushions,
-shelves, individual books, and a lamp. Front and left walls are open for the
-cutaway. The wireframe and points are generated from surfaces at startup.
+With no bridge at all, `node serve.js` shows the viewer on built-in mock data.
 
 ## LiDAR spatial memory
 
@@ -166,7 +97,135 @@ Not verified: the iPhone app has never been compiled, and no real LiDAR frame
 has passed through this pipeline. Everything above was exercised with
 synthetic frames only.
 
-## Backend handoff
+## Viewer controls
+
+- **Orbit / Camera / Top** switch between a cutaway, eye-height view, and
+  overhead view. Drag to orbit, Shift-drag or right-drag to pan, and scroll
+  to zoom. In Top view, dragging pans. On a touchscreen, pinch to zoom.
+- With the canvas focused, use arrow keys to rotate, Shift + arrows to pan,
+  + and − to zoom, and 0 to reset the current view.
+- **Render mode** switches between cyan points, natural-color points, and
+  triangular wireframe. The wireframe has cyan, ice, and height-based tints.
+- **Max vertices** caps the rendered points or line vertices. **Point size**
+  adjusts points only. **Frame skip** skips geometry uploads in socket mode
+  while retaining telemetry on the preview fixture. For sonar, it skips
+  whole frames so detections stay paired with their own point cloud. In
+  mock mode it slows telemetry refresh.
+- **Grid** draws a one-meter coordinate grid. **RF rings** shows three
+  simulated anchors and their coverage rings. The amber outline shows the
+  estimated zone when the source supplies an estimate above the UI threshold.
+- **Height slice** shows a 44 cm band centered at the selected height.
+  **Estimate trail** shows recent confident estimates and leaves gaps when
+  the estimate was missing. The trail is disabled for sonar frames because
+  the bridge supplies sensor-relative positions. **Camera** adds a heading
+  and overhead map.
+
+## Saved Maps
+
+Open **Saved Maps** to find two labeled mock scans of the same room. The
+second pass includes returns that the first missed near the chair and
+bookcase. Select both thumbnails' **Compare** checkboxes and choose
+**Compare** to open the synchronized cameras. **Change overlay** uses
+0.25 m cells to highlight returns in the later scan that have no matching
+cell in the earlier scan. Gray returns do not establish that a surface was
+removed or that an unobserved area was clear. The overlay is available only
+for scans with a shared coordinate frame. The current socket decoder has
+no alignment metadata, so live captures can be viewed side by side with the
+overlay disabled.
+
+Use **Save snapshot** in the scanner to capture the current geometry,
+telemetry and thumbnail. The library supports renaming, deleting, and
+filtering by name or data source. Selecting a thumbnail reopens that map
+in the scanner. Use **Replay** or scrub the timeline to see the stored
+frames and estimate gaps. The two demo maps show a synthetic scan build;
+new snapshots retain the most recent 12 one-second samples plus the
+capture frame. A snapshot with just one frame still opens in the viewer.
+
+The archive uses IndexedDB in this browser, scoped to the address and port.
+Reloading the same URL keeps the maps. Clearing this site's browser data
+removes them. Maps are not synced or uploaded. The scanner on the Scan
+tab keeps receiving socket messages while a saved map is open.
+
+## Verify
+
+```sh
+node --test                                  # viewer, spatial memory, classifier
+cd websocket-bridge && .venv/bin/python -m pytest   # bridge
+```
+
+The tests cover LiDAR frame decoding, voxel filtering, coverage cells, room
+classification on a labeled synthetic room, audio cue
+rate limiting, preview payload conversion, malformed or oversized points,
+decoder injection and disconnect, replay sample selection, and cell-based
+change detection. For visual verification, load the page
+and switch between all three camera and render modes. Change the vertex cap
+and point size, enable Grid and RF rings, and try orbit, pan, and zoom.
+At a phone width the controls start collapsed and can be opened above the
+viewport. The browser check used a local WebSocket fixture to verify geometry
+replacement, telemetry, invalid message handling and disconnect recovery.
+
+## Repository layout
+
+| Path | What | Owner |
+|---|---|---|
+| `ios-lidar/` | iPhone ARKit app that publishes LiDAR frames | Rishi |
+| `websocket-bridge/` | Python bridge, [LiDAR protocol](websocket-bridge/LIDAR_PROTOCOL.md), record and replay | Charvik |
+| `index.html`, `style.css`, `serve.js`, `src/` | Web viewer and LiDAR rendering | Akshath |
+| `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js` | Spatial memory, room classification, floor plan, audio cues | Ryan |
+| `test/` | Viewer tests, including the scan simulator | viewer and Ryan |
+| `docs/` | [Demo plan](docs/DEMO.md) | Ryan |
+| `scripts/` | Setup and run helpers | shared |
+| `acoustic/`, `sonar-ml/` | Earlier sonar work, simulated data only | Ryan, Rishi |
+
+Rules for working in the repo are in [AGENTS.md](AGENTS.md).
+
+### Branches
+
+- `main`: what the team has agreed to demo. Merge only after telling the team.
+- `develop`: integrated work waiting to go to `main`.
+- Your own work: `<area>/<short-name>`, for example `ios/pose-fix`,
+  `bridge/replay-speed`, `viewer/trail-colour`, `memory/change-detection`.
+  Open a pull request into `develop`.
+
+# Earlier work
+
+The sections below describe the mock scene and the sonar and acoustic
+pipelines built before the switch to LiDAR. They still run, on simulated data.
+
+## The mock scene
+
+The UI starts with **Mock data**, a modeled living room. The earlier sonar
+simulation, ML and acoustic scanner are still in the repo and still run on
+simulated data only.
+
+### Run the viewer alone
+
+Use Node.js 20 or later.
+
+```sh
+node serve.js
+```
+
+Open `http://127.0.0.1:4173/` in a WebGL-capable browser. There are no packages
+to install. Stop the static development server with Ctrl+C.
+
+## Geometry and reference choices
+
+The references use several rendering styles and show different interiors. The
+default scene follows the cyan living-room cutaway: two exposed walls, a
+doorway on the left, framed picture and three-seat couch, low open-shelf table
+in front, window on the right, then an armchair and bookcase. The eye-height
+wireframe uses triangulated surfaces, with a partial ceiling and bright
+edges. Natural color and RF/grid layers come from the corresponding reference
+images. The compact upper-right controls follow the point-cloud viewer panel.
+
+The images provide no scale or measured scan. The model assumes an
+8.6 × 6.4 × 3.15 m room and uses Y-up coordinates in meters. Furniture is
+modeled from visible silhouettes and relationships, with rounded cushions,
+shelves, individual books, and a lamp. Front and left walls are open for the
+cutaway. The wireframe and points are generated from surfaces at startup.
+
+## Sonar bridge handoff
 
 To use the team's sonar WebSocket bridge, start it in a second terminal from
 the repository root using Python 3.11+:
@@ -264,20 +323,3 @@ cd sonar-ml
 python3 -m venv .venv && .venv/bin/pip install -e "perception[dev]"
 cd perception && ../.venv/bin/python -m pytest
 ```
-
-## Verify
-
-```sh
-node --test
-```
-
-The tests cover LiDAR frame decoding, voxel filtering, coverage cells, room
-classification on a labeled synthetic room, audio cue
-rate limiting, preview payload conversion, malformed or oversized points,
-decoder injection and disconnect, replay sample selection, and cell-based
-change detection. For visual verification, load the page
-and switch between all three camera and render modes. Change the vertex cap
-and point size, enable Grid and RF rings, and try orbit, pan, and zoom.
-At a phone width the controls start collapsed and can be opened above the
-viewport. The browser check used a local WebSocket fixture to verify geometry
-replacement, telemetry, invalid message handling and disconnect recovery.
