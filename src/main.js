@@ -2,7 +2,9 @@ import { buildRoom, anchors } from './room.js';
 import { createViewer } from './viewer.js';
 import { mockFrame } from './mock.js';
 import { openFeed } from './feed.js';
-import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
+import { decodeSocketFrame, sonarLabel } from './sonar.js';
+import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL } from './lidar.js';
+import { createCues } from './audio-cues.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
 import { sampleScans, MOCK_SPACE } from './samples.js';
 import { createLibrary } from './library.js';
@@ -14,7 +16,12 @@ const mode = el('render-mode'), pointSize = el('point-size'), pointCap = el('max
 const skip = el('frame-skip'), grid = el('grid'), rings = el('rings');
 const connection = el('connection-state'), note = el('connection-note'), source = el('source');
 const address = el('address'), connect = el('connect');
-address.value = SONAR_URL;
+// The live sensor is the iPhone LiDAR. The sonar bridge is still at ws://127.0.0.1:8765/ws.
+address.value = LIDAR_URL;
+const cues = createCues();
+const lidar = createLidarSession({ onEvent: name => cues.play(name) });
+// LiDAR messages go to the LiDAR session. Everything else is tried as sonar or preview.
+const decodeFrame = async payload => await lidar.decode(payload) ?? decodeSocketFrame(payload);
 const marker = el('target-marker'), loading = el('loading');
 const labels = anchors.map((_, i) => {
   const label = document.createElement('span');
@@ -88,7 +95,7 @@ function openSaved(map) {
   el('connection-form').hidden = true;
   el('connection-note').hidden = true;
   updateModeAvailability();
-  writeSource(map.sonar ? `Saved · ${sonarLabel(map.sonar)}` : map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
+  writeSource(map.lidar ? `Saved · ${lidarLabel(map.lidar)}` : map.sonar ? `Saved · ${sonarLabel(map.sonar)}` : map.source === 'mock' ? 'Saved · Mock' : 'Saved · Live');
   source.removeAttribute('data-live');
   set('study', map.name);
   show('scan');
@@ -161,7 +168,7 @@ function updateViewLabel() {
 }
 function resetScanCamera() {
   viewer?.preset(view);
-  if ((savedMap?.sonar || !savedMap && latest.sonar) && currentPoints instanceof Float32Array) {
+  if ((savedMap?.sonar || !savedMap && (latest.sonar || latest.lidar)) && currentPoints instanceof Float32Array) {
     viewer.frameCloud(currentPoints);
   }
 }
@@ -180,13 +187,49 @@ function writeSource(label) {
 }
 
 function showScanSource() {
-  const sonar = latest.sonar;
-  source.toggleAttribute('data-live', live && sonar?.acquisition !== 'simulated');
-  writeSource(!live ? 'Mock data' : sonar ? sonarLabel(sonar) : 'Socket data');
-  set('study', !live ? 'Living room / sample scan'
-    : sonar?.modality === 'lidar' ? sonar.reference === 'world' ? 'LiDAR · Room map' : 'LiDAR · Phone-relative scan'
+  const sonar = latest.sonar, scan = latest.lidar;
+  source.toggleAttribute('data-live', live && (scan ? !scan.simulated && scan.mode === 'live'
+    : sonar?.acquisition !== 'simulated'));
+  writeSource(!live ? 'Mock data' : scan ? lidarLabel(scan) : sonar ? sonarLabel(sonar) : 'Socket data');
+  set('study', !live ? 'Living room / sample scan' : scan ? 'LiDAR · Spatial memory'
     : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
+  el('lidar-panel').hidden = !(live && scan);
 }
+
+const trackingText = { normal: 'Tracking', limited: 'Tracking limited', not_available: 'No tracking' };
+let coverageRevision = -1;
+function showLidarStatus(scan) {
+  const { stats } = scan;
+  note.textContent = scan.mode === 'live' && !scan.publisher ? 'Waiting for the phone to connect to the bridge.'
+    : `${trackingText[scan.tracking] ?? 'Waiting for a frame'}${scan.paused ? ' · display paused' : ''}` +
+      `${scan.recording ? ' · recording' : ''}. ${stats.framesSkipped} frames skipped without tracking.`;
+  set('lidar-observed', `${stats.observedArea.toFixed(1)} m²`);
+  set('lidar-path', `${stats.pathMeters.toFixed(1)} m`);
+  set('lidar-voxels', numbers.format(stats.voxels) + (stats.dropped ? ' (full)' : ''));
+  if (coverageRevision !== lidar.memory.revision) {
+    coverageRevision = lidar.memory.revision;
+    drawCoverage(el('coverage-map'), lidar.memory);
+  }
+}
+el('lidar-clear').addEventListener('click', () => {
+  lidar.clear();
+  if (!live || !latest.lidar) return;
+  applyFrame(lidar.current(), true);
+  showLidarStatus(latest.lidar);
+});
+el('lidar-pause').addEventListener('click', event => {
+  lidar.setPaused(!lidar.paused);
+  event.currentTarget.textContent = lidar.paused ? 'Resume' : 'Pause';
+  event.currentTarget.setAttribute('aria-pressed', String(lidar.paused));
+  if (!live || !latest.lidar) return;
+  applyFrame(lidar.current(), true);
+  showLidarStatus(latest.lidar);
+});
+// The library writes this text once a snapshot is actually stored.
+new MutationObserver(() => {
+  if (el('capture-status').textContent === 'Snapshot saved') cues.play('scan_saved');
+}).observe(el('capture-status'), { childList: true });
+el('lidar-audio').addEventListener('change', event => cues.setEnabled(event.currentTarget.checked));
 
 function applyFrame(frame, force = false) {
   const { points, ...telemetry } = frame;
@@ -219,6 +262,7 @@ function status(state) {
   if (state === 'complete') {
     if (skippedSonar) applyFrame(skippedSonar, true);
     sonarReplayComplete = true;
+    cues.play('replay_complete');
   }
   if (!busy && state !== 'complete') {
     if (scanCameraBeforeSonar) {
@@ -253,8 +297,9 @@ el('connection-form').addEventListener('submit', event => {
   }
   try {
     let firstFrame = true;
+    lidar.reset();
     disconnect = openFeed(address.value.trim(), {
-      decode: decodeSocketFrame,
+      decode: decodeFrame,
       onStatus: status,
       onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
@@ -272,10 +317,11 @@ el('connection-form').addEventListener('submit', event => {
           livePoints = emptyPoints;
           updateModeAvailability();
         }
-        frameSonar ||= Boolean(frame.sonar && !livePoints?.length);
+        frameSonar ||= Boolean((frame.sonar || frame.lidar) && !livePoints?.length);
         applyFrame(frame);
         if (!savedMap) showScanSource();
-        note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
+        if (latest.lidar) showLidarStatus(latest.lidar);
+        else note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
           : `${latest.sonar.detectionCount} model detections.` : 'Receiving preview frames.';
       },
     });
@@ -360,7 +406,8 @@ el('save-scan').addEventListener('click', () => {
   samples.push(entry);
   library.save({
     ...entry, id: crypto.randomUUID(), name: live ? 'Room scan' : 'Living room snapshot',
-    date: new Date().toISOString(), source: live && latest.sonar?.acquisition !== 'simulated' ? 'live' : 'mock',
+    date: new Date().toISOString(),
+    source: live && latest.sonar?.acquisition !== 'simulated' && !latest.lidar?.simulated ? 'live' : 'mock',
     space: live ? null : MOCK_SPACE,
     history: samples, thumb: thumbnail(canvas),
   });
@@ -384,7 +431,7 @@ function render(time) {
   activeSample = { t: sonarReplayComplete ? latestTargetAt ?? time : time,
     target: latestTarget?.confidence >= 0.5 ? latestTarget : null,
     points: live ? livePoints ?? emptyPoints : demoPoints, frame: latest.frame, latencyMs: latest.latencyMs,
-    sonar: latest.sonar, captureTime: latest.captureTime, snr: latest.snr };
+    sonar: latest.sonar, lidar: latest.lidar, captureTime: latest.captureTime, snr: latest.snr };
   if ((!sonarReplayComplete || history.at(-1)?.frame !== activeSample.frame) &&
       (activeSample.points.length || history.length)) sampleHistory(history, activeSample);
   requestAnimationFrame(render);
@@ -398,13 +445,13 @@ function render(time) {
     viewer.replaceCloud(displayPoints);
     configureSlice(displayPoints ?? demoPoints);
   }
-  if ((!savedMap && frameSonar || savedMap?.sonar && activeSavedMap !== savedMap) && displayPoints?.length) {
+  if ((!savedMap && frameSonar || (savedMap?.sonar || savedMap?.lidar) && activeSavedMap !== savedMap) && displayPoints?.length) {
     viewer.frameCloud(displayPoints);
     if (savedMap) activeSavedMap = savedMap;
     else frameSonar = false;
   }
   const target = sample.target ?? null;
-  el('trail-enabled').disabled = Boolean(sample.sonar);
+  el('trail-enabled').disabled = Boolean(sample.sonar || sample.lidar);
   const inspectionTrail = el('trail-enabled').checked && !sample.sonar;
   const key = inspectionTrail ? frame.history.filter(entry => entry.t <= frame.t).at(-1) : null;
   if (key !== trailKey) {
@@ -417,9 +464,10 @@ function render(time) {
   renderOptions = { mode: mode.value, pointSize: Number(pointSize.value), pointCap: pointLimit,
     showGrid: grid.checked, rings: showRings, target, meshTint: el('mesh-tint').value,
     heightRange: el('slice-enabled').checked ? [height - 0.22, height + 0.22] : undefined,
-    trail, time: motion.matches ? 0 : tick * 100 };
+    // In LiDAR mode the trail is the scanner's own path, not a target estimate.
+    trail: sample.lidar ? sample.lidar.trail : trail, time: motion.matches ? 0 : tick * 100 };
   viewer.draw(renderOptions);
-  const markerLabel = sample.sonar ? 'Sonar person estimate' : 'Estimated zone';
+  const markerLabel = sample.lidar ? 'Scanner' : sample.sonar ? 'Sonar person estimate' : 'Estimated zone';
   if (marker.lastChild.textContent !== markerLabel) marker.lastChild.textContent = markerLabel;
   place(marker, target && [target.position[0], target.position[1] + 0.5, target.position[2]]);
   labels.forEach((label, i) => {
@@ -439,15 +487,13 @@ function render(time) {
     const vertexCount = mode.value === 'mesh' && viewer.hasMesh ? viewer.meshCount : viewer.count;
     set('vertices', numbers.format(Math.min(vertexCount, pointLimit)));
     set('frame', sample.frame ?? '—');
-    const lidar = sample.sonar?.modality === 'lidar';
-    // LiDAR intensity is ARKit depth confidence, 0 to 2.
-    set('signal-label', lidar ? 'Depth confidence' : sample.sonar ? 'Mean SNR' : 'Latency');
-    set('latency', sample.sonar ? sample.snr == null ? '—'
-      : lidar ? `${Math.round(sample.snr * 50)}%` : `${sample.snr.toFixed(1)}×`
+    set('signal-label', sample.lidar ? 'Tracking' : sample.sonar ? 'Mean SNR' : 'Latency');
+    set('latency', sample.lidar ? trackingText[sample.lidar.tracking] ?? '—'
+      : sample.sonar ? sample.snr == null ? '—' : `${sample.snr.toFixed(1)}×`
       : sample.latencyMs === undefined ? '—' : `${Math.round(sample.latencyMs)} ms`);
-    el('capture-clock').hidden = !sample.sonar;
+    el('capture-clock').hidden = !(sample.sonar || sample.lidar);
     set('capture-time', sample.captureTime === undefined ? '—' : `${sample.captureTime.toFixed(2)} s`);
-    set('estimate', target ? `${Math.round(target.confidence * 100)}%` : 'Unknown');
+    set('estimate', sample.lidar ? 'Scanner pose' : target ? `${Math.round(target.confidence * 100)}%` : 'Unknown');
     if (savedMap) {
       let last = null;
       for (const entry of frame.history) {

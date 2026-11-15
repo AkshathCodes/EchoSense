@@ -6,15 +6,9 @@ enum DepthProjection {
     /// Beyond about 5 m the iPhone LiDAR returns little usable depth.
     static let maxRange: Float = 5.0
 
-    /// Unprojects every `step`-th depth pixel.
-    ///
-    /// - `reference == .sensor`: points are relative to the phone, with the forward
-    ///   axis flattened onto the floor plane. This uses only the gravity direction,
-    ///   which comes from the motion sensors and survives a dark room.
-    /// - `reference == .world`: points are in the ARKit session frame, which is only
-    ///   meaningful while camera tracking is normal.
-    static func points(depth: ARDepthData, camera: ARCamera, step: Int,
-                       minConfidence: UInt8, reference: ReferenceFrame) -> [ScanPoint] {
+    /// Unprojects every `step`-th depth pixel into ARKit world coordinates.
+    /// The result is only meaningful while camera tracking is normal.
+    static func worldPoints(depth: ARDepthData, camera: ARCamera, step: Int, minConfidence: UInt8) -> [ScanPoint] {
         let depthMap = depth.depthMap
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
@@ -38,10 +32,7 @@ enum DepthProjection {
         let fy = intrinsics[1][1] * scaleY
         let cx = intrinsics[2][0] * scaleX
         let cy = intrinsics[2][1] * scaleY
-
         let transform = camera.transform
-        let origin = simd_make_float3(transform.columns.3)
-        let (forward, left) = levelAxes(transform)
 
         var result: [ScanPoint] = []
         result.reserveCapacity((width / step + 1) * (height / step + 1))
@@ -56,37 +47,13 @@ enum DepthProjection {
                 if d.isFinite && d > 0.1 && d < maxRange && confidence >= minConfidence {
                     // ARKit camera space: +X right, +Y up, -Z into the scene. Image Y runs down.
                     let local = simd_float4((Float(u) - cx) * d / fx, -(Float(v) - cy) * d / fy, -d, 1)
-                    let world = simd_make_float3(transform * local)
-                    switch reference {
-                    case .sensor:
-                        let offset = world - origin
-                        result.append(ScanPoint(x: simd_dot(offset, forward), y: simd_dot(offset, left),
-                                                z: offset.y, confidence: confidence))
-                    case .world:
-                        // ARKit world is +Y up with -Z ahead of the starting pose.
-                        result.append(ScanPoint(x: -world.z, y: -world.x, z: world.y, confidence: confidence))
-                    }
+                    result.append(ScanPoint(position: simd_make_float3(transform * local), confidence: confidence))
                 }
                 u += step
             }
             v += step
         }
         return result
-    }
-
-    /// Horizontal forward and left unit vectors for the phone's current heading.
-    private static func levelAxes(_ transform: simd_float4x4) -> (simd_float3, simd_float3) {
-        var heading = -simd_make_float3(transform.columns.2)
-        heading.y = 0
-        if simd_length(heading) < 0.2 {
-            // Camera points at the floor or ceiling. Use the top edge of a portrait phone.
-            heading = -simd_make_float3(transform.columns.0)
-            heading.y = 0
-        }
-        if simd_length(heading) < 1e-4 { heading = simd_float3(0, 0, -1) }
-        let forward = simd_normalize(heading)
-        let left = simd_float3(forward.z, 0, -forward.x)   // up × forward
-        return (forward, left)
     }
 
     /// Distance to the closest thing in the middle third of the view, in meters.

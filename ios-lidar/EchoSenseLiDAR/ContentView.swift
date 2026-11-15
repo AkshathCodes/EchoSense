@@ -25,9 +25,12 @@ struct ContentView: View {
             VStack(spacing: 12) {
                 statusBar
                 if let problem = scanner.problem { banner(problem) }
-                if scanner.mode == .map && !scanner.trackingNormal {
-                    banner("Room map is paused: \(scanner.trackingText.lowercased()). "
-                           + "Turn on the torch or switch to Live.")
+                if scanner.scanning && !scanner.trackingNormal {
+                    banner("No points are being sent: \(scanner.trackingText.lowercased()). "
+                           + "Move slowly, add light, or turn on the torch.")
+                }
+                if scanner.scanning && bridge.status != .connected {
+                    banner("Scanning, but the laptop is not connected. Tap Laptop.")
                 }
                 Spacer()
                 distanceReadout
@@ -60,7 +63,8 @@ struct ContentView: View {
             Text(scanner.nearest.map { String(format: "%.2f m", $0) } ?? "No return")
                 .font(.system(size: 56, weight: .bold, design: .rounded))
                 .monospacedDigit()
-            Text("nearest obstacle ahead · \(scanner.pointCount) points")
+            Text(scanner.scanning ? "nearest ahead · sending \(scanner.pointsPerFrame) points a frame"
+                 : "nearest obstacle ahead")
                 .font(.footnote)
         }
         .foregroundStyle(.white)
@@ -71,24 +75,30 @@ struct ContentView: View {
 
     private var controls: some View {
         VStack(spacing: 10) {
-            Picker("Mode", selection: $scanner.mode) {
-                ForEach(LiDARScanner.Mode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
+            Button {
+                scanner.scanning.toggle()
+            } label: {
+                Label(scanner.scanning ? "Stop scan" : "Start scan",
+                      systemImage: scanner.scanning ? "stop.fill" : "dot.radiowaves.left.and.right")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
-            .pickerStyle(.segmented)
+            .buttonStyle(.borderedProminent)
+            .tint(scanner.scanning ? .red : .blue)
+            Text("Session \(scanner.sessionLabel)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.white.opacity(0.7))
             HStack(spacing: 10) {
                 toggleButton("Torch", icon: "flashlight.on.fill", isOn: $scanner.torchOn)
                 toggleButton("Pulse", icon: "waveform", isOn: $scanner.hapticsOn)
-                if scanner.mode == .map {
-                    Button {
-                        scanner.resetMap()
-                    } label: {
-                        Label("Reset map", systemImage: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
+                Button {
+                    scanner.newSession()
+                } label: {
+                    Label("New", systemImage: "arrow.counterclockwise")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
                 Button {
                     showSettings = true
                 } label: {
@@ -133,14 +143,6 @@ struct ContentView: View {
                     case .connected: Text("Connected, \(bridge.framesSent) frames sent")
                     case .failed(let reason): Text("Retrying: \(reason)")
                     }
-                }
-                Section {
-                    Toggle("Send low-confidence points", isOn: $scanner.includeLowConfidence)
-                } header: {
-                    Text("Live points")
-                } footer: {
-                    Text("Turn this on if the laptop view is nearly empty in a dark room. "
-                         + "Expect more stray points around edges.")
                 }
                 Section("Feedback") {
                     Toggle("Vibrate near obstacles", isOn: $scanner.hapticsOn)

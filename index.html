@@ -89,6 +89,19 @@
           </form>
           <p id="connection-note">Start the bridge, then connect.</p>
         </section>
+        <section id="lidar-panel" class="controls lidar-panel" aria-label="LiDAR spatial memory" hidden>
+          <div class="row"><span>Observed floor area</span><strong id="lidar-observed">0.0 m²</strong></div>
+          <div class="row"><span>Scanner path</span><strong id="lidar-path">0.0 m</strong></div>
+          <div class="row"><span>Surface cells kept</span><strong id="lidar-voxels">0</strong></div>
+          <canvas id="coverage-map" width="236" height="150" aria-label="Plan view of observed and unobserved areas"></canvas>
+          <p class="coverage-key"><i class="surface"></i>Surface <i class="seen"></i>Seen through <i class="unknown"></i>Not observed</p>
+          <p class="caveat">Not observed means no measurement. It does not mean empty, clear or safe.</p>
+          <div class="lidar-actions">
+            <button id="lidar-clear" type="button">Clear map</button>
+            <button id="lidar-pause" type="button" aria-pressed="false">Pause</button>
+            <label><input id="lidar-audio" type="checkbox"> Audio cues</label>
+          </div>
+        </section>
         <section class="controls inspection" aria-label="Inspection tools">
           <div class="toggles">
             <label><input id="slice-enabled" type="checkbox"> Height slice</label>

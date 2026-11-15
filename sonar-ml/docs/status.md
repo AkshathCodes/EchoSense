@@ -4,13 +4,12 @@ _Last updated 2026-11-14 (session 5: moved into the EchoSense monorepo as `sonar
 
 ## Sensor change (2026-11-14, evening)
 
-The sonar hardware is no longer available for MadHacks. The live sensor for
-the demo is an iPhone LiDAR app ([`ios/`](../../ios/README.md)) that streams
-points through `websocket-bridge --lidar` in this package's X forward / Y left
-/ Z up frame. Nothing in `sonar-ml/` changed: it still runs on simulated sonar
-only, and its classifier has **not** been run on LiDAR points (LiDAR frames
-carry `detections: null`). The intensity column of a LiDAR frame is ARKit depth
-confidence (0 to 2), not SNR.
+The sonar hardware is no longer available for MadHacks. The project is now
+ECHO RESCUE: an iPhone LiDAR app ([`ios-lidar/`](../../ios-lidar/README.md))
+publishes ARKit world-space points over a separate `lidar_frame` v1 transport
+([protocol](../../websocket-bridge/LIDAR_PROTOCOL.md)). LiDAR data does not use
+`SonarFrame`, this package's forward/left/up frame, or its classifier. Nothing
+in `sonar-ml/` changed; it still runs on simulated sonar only.
 
 ## Summary
 
