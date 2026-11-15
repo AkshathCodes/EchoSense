@@ -19,6 +19,11 @@ This is the path that has run on a real phone
 ([log](sonar-ml/docs/log/2026-11-14-iphone-lidar-pivot.md)). Full darkness
 has not been tested yet.
 
+![Dense height-coloured LiDAR map of a room from the final scans](docs/assets/scans/2026-11-15-1045-room-from-above.png)
+
+A map from the final scans on 2026-11-15: colour is height, the orange line is
+the phone's path. More views: [docs/SCANS.md](docs/SCANS.md).
+
 ## Quick start
 
 Needs Node 20+ and Python 3.11+ (macOS ships 3.9: `brew install python@3.12`).
