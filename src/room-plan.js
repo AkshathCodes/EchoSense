@@ -8,7 +8,8 @@ const css = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${
 const objectTints = ['#ff9f33', '#f2c14e', '#ef6f6c', '#c58af9', '#7bd88f', '#5cc8ff'];
 
 /** `path` is the scanner trajectory as [x, y, z]; `simulated` adds a visible label. */
-export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, title = 'ECHO room analysis' } = {}) {
+export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, title = 'ECHO room analysis',
+  sonarSurface = [] } = {}) {
   const ctx = canvas.getContext('2d'), { width, height } = canvas;
   const header = 54, footer = 64, margin = 28;
   ctx.fillStyle = '#080d13';
@@ -72,6 +73,15 @@ export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, t
     ctx.fill();
   }
 
+  // Sonar-only surfaces: where ultrasound found something the LiDAR did not (flat XYZ, viewer axes).
+  ctx.fillStyle = '#ff40e6';
+  for (let i = 0; i + 2 < sonarSurface.length; i += 3) {
+    const [sx, sy] = meters(sonarSurface[i], sonarSurface[i + 2]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - 6); ctx.lineTo(sx + 6, sy); ctx.lineTo(sx, sy + 6); ctx.lineTo(sx - 6, sy);
+    ctx.fill();
+  }
+
   // Object labels last so nothing covers them.
   ctx.font = '600 13px system-ui, sans-serif';
   ctx.textAlign = 'center';
@@ -108,6 +118,7 @@ export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, t
   swatch('#17323c', 'Floor seen');
   swatch(objectTints[0], 'Object (letter · height)');
   if (path.length) swatch('#ff7a59', 'Scanner path');
+  if (sonarSurface.length) swatch('#ff40e6', 'Sonar only (LiDAR saw nothing here)');
   ctx.strokeStyle = '#33485a';
   ctx.strokeRect(lx + 0.5, by - 3.5, 11, 11);
   ctx.fillStyle = '#c5d3dc';

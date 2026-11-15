@@ -22,11 +22,15 @@ Use the same line in the README, the Devpost page and the pitch.
    right, and send Ryan a screenshot if not: the thresholds are in
    `src/mapper-adapter.js` (`classifierSteps`) and `src/room-classifier.js`.
 
+4. **If using the sonar:** build and mount it per `hardware/hcsr04/README.md`,
+   pass the wall test at 1 m and 2 m, and try the glass you plan to point at.
+   Some coated glass does return LiDAR, and then there is nothing to show.
+
 ## Setup (10 minutes before)
 
 1. iPhone Personal Hotspot over USB to the Mac.
-2. `scripts/run-lidar.sh --mapper` in the repo. Do not start the bridge: both
-   use port 8765.
+2. `scripts/run-lidar.sh --mapper` in the repo (with `SONAR_PORT=...` in front
+   if the sonar is attached). Do not start the bridge: both use port 8765.
 3. Phone app: Mac URL `ws://172.20.10.2:8770/depth` (check the Mac's address),
    depth source LiDAR only, Start streaming.
 4. Browser: `http://127.0.0.1:4173/`, Sensor feed **Sonar / Preview**, Connect.
@@ -57,6 +61,7 @@ From the real runs in the mapper log:
 | 3 | Switch to the dense map tab | "This is the full map, a few hundred thousand points." | Dense view |
 | 4 | Back to the viewer, click **Room analysis** | "It sorts the map into floor, walls and objects and measures each object. It does not claim to know what they are." | Floor plan with lettered objects and heights |
 | 5 | Point at the black area you left unscanned | "Black is not observed. We never call that clear." | Unscanned corner stays black |
+| 5b (if the sonar is mounted and passed its wall test) | Point square at a window or glass door from about a meter | "LiDAR looks straight through glass. The ultrasonic sensor does not." | Readout turns magenta: surface LiDAR cannot see; a magenta point appears |
 | 6 (if the dark test passed) | Lights off, scan a new section | "Same result with the lights off." | Map keeps growing |
 | 7 | Download PNG; Save snapshot | "The plan and the scan can be reviewed afterwards." | Saved map |
 
@@ -89,7 +94,8 @@ simulated.
 - Bridge path (`websocket-bridge --lidar`, `ios-lidar/`): fallback only. It
   has a coverage map, scanner path and audio cues, but its app has never been
   compiled.
-- Sonar range ingestion (PR #6): no hardware to test with.
+- Bridge-side sonar range ingestion (PR #6): separate from the mapper's sonar
+  cross-check. The same firmware feeds either.
 - Databricks: works per the mapper log. Mention it only if a sponsor prize
   needs it.
 - Change detection between two scans, headgear mockup: not built.

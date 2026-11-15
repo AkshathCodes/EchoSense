@@ -7,6 +7,9 @@
 #   scripts/run-lidar.sh --mapper-sim          no phone: the mapper's SIMULATED room
 #   scripts/run-lidar.sh --mapper-replay FILE  re-map a recorded .esd session
 #   In the viewer choose Sensor feed "Sonar / Preview" (ws://127.0.0.1:8765/ws) and Connect.
+#   HC-SR04 attached?  SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper
+#   Optional: SONAR_MOUNT=RIGHT,DOWN,FORWARD in meters (see hardware/hcsr04/README.md).
+#   SONAR_SIM=1 with --mapper-sim adds SIMULATED sonar readings.
 #
 # Fallback path (lidar_frame v1 bridge in websocket-bridge/):
 #   scripts/run-lidar.sh                    live: phone publishes, session recorded
@@ -70,13 +73,19 @@ case "$mode" in mapper*)
   cd "$mapper"
   mkdir -p recordings
   stamp="$(date +%Y%m%d-%H%M%S)"
+  sonar=()
+  if [ -n "${SONAR_PORT:-}" ] && [ "$mode" = "mapper" ]; then
+    .venv/bin/python -c 'import serial' 2>/dev/null || .venv/bin/pip install --quiet pyserial
+    sonar=(--sonar-port "$SONAR_PORT" --sonar-mount "${SONAR_MOUNT:-0,0,0}")
+  fi
+  [ -n "${SONAR_SIM:-}" ] && [ "$mode" = "mapper-sim" ] && sonar=(--sonar-sim)
   # 50,000 viewer points: the viewer's mapper adapter accepts up to 60,000.
   case "$mode" in
-    mapper) .venv/bin/python -m lidar_mapper serve --viewer-points 50000 \
+    mapper) .venv/bin/python -m lidar_mapper serve --viewer-points 50000 ${sonar[@]+"${sonar[@]}"} \
               --record "recordings/session-$stamp.esd" --ply "recordings/session-$stamp.ply" & ;;
     mapper-sim)
       echo "Starting the mapper's SIMULATED room. This is not real LiDAR data."
-      .venv/bin/python -m lidar_mapper sim --frames 200 --serve --viewer-points 50000 & ;;
+      .venv/bin/python -m lidar_mapper sim --frames 200 --serve --viewer-points 50000 ${sonar[@]+"${sonar[@]}"} & ;;
     mapper-replay) .venv/bin/python -m lidar_mapper replay "$replay" --serve --viewer-points 50000 & ;;
   esac
   pids+=($!)
