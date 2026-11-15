@@ -71,3 +71,19 @@ credentials/
 *.crt
 id_rsa*
 id_ed25519*
+
+# Scoped independent range ingestion/integration.
+!/sonar_bridge/range_protocol.py
+!/sonar_bridge/range_processing.py
+!/sonar_bridge/range_recording.py
+!/sonar_bridge/range_adapter.py
+!/sonar_bridge/range_server.py
+!/tests/test_range_protocol.py
+!/tests/test_range_processing.py
+!/tests/test_range_adapter.py
+!/tests/test_range_server.py
+!/range_smoke_test.py
+!/range_readout.py
+
+!/fixtures/
+!/fixtures/range-synthetic.txt

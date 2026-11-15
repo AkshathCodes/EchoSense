@@ -10,6 +10,7 @@ const patterns = {
   publisher_lost: [[440, 0.12], [294, 0.18]],           // falling pair
   scan_saved: [[1047, 0.05], [1319, 0.07]],
   replay_complete: [[587, 0.2]],
+  lidar_blind: [[988, 0.07], [740, 0.07], [988, 0.07]],  // sonar found a surface the LiDAR cannot see
 };
 export const cueNames = Object.keys(patterns);
 

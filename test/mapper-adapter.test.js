@@ -124,3 +124,25 @@ test('other payloads fall through to the sonar decoder, bad mapper frames are re
   bad.frame.points = Array.from({ length: MAPPER_MAX_POINTS + 1 }, () => [0, 0, 0, 2]);
   await assert.rejects(session.decode(JSON.stringify(bad)));
 });
+
+test('sonar status and sonar-only surface points come through, labelled when simulated', async () => {
+  const { readSonarStatus, sonarText } = await import('../src/mapper-adapter.js');
+  const message = JSON.parse(mapperMessage(room.subarray(0, 3000), { live: [[0, 0, -1]] }));
+  message.frame.points.push([0.9, 0.2, 0.1, 200]);          // mapper axes: forward, left, up
+  message.frame.meta.sonar = { state: 'sonar_closer', range_m: 0.9, lidar_near_m: 2.41, lidar_median_m: 2.5,
+    surface_points: 1, synthetic: true, age_ms: 40 };
+  const session = createMapperSession();
+  const frame = await session.decode(JSON.stringify(message));
+  assert.equal(frame.mapper.mapPoints, 1000);
+  assert.equal(frame.mapper.livePoints, 1);
+  assert.deepEqual([...session.sonarSurface].map(n => +n.toFixed(2)), [-0.2, 0.1, -0.9]);
+  assert.deepEqual([...frame.colors.slice(-3)].map(n => +n.toFixed(2)), [1, 0.25, 0.9]);
+  assert.equal(frame.mapper.sonar.blind, true);
+  assert.equal(sonarText(frame.mapper.sonar), 'Simulated sonar 0.90 m · LiDAR 2.41 m · surface LiDAR cannot see');
+  assert.equal(sonarText(readSonarStatus({ state: 'agree', range_m: 2.4, lidar_near_m: 2.41 })), 'Sonar 2.40 m · LiDAR 2.41 m · agree');
+  assert.equal(sonarText(readSonarStatus({ state: 'no_sonar', range_m: null, lidar_near_m: null })), 'Sonar no echo · LiDAR no return · no fresh reading');
+  assert.equal(readSonarStatus({ state: 'made_up' }), null);
+  assert.equal(readSonarStatus(undefined), null);
+  const plain = await createMapperSession().decode(mapperMessage(room.subarray(0, 3000)));
+  assert.equal(plain.mapper.sonar, null);
+});

@@ -46,6 +46,13 @@ class totals, and separate ceiling and uncertain-return layers. The viewer
 uses the geometric classifier if trained inference fails. The weights were
 trained on synthetic scans and have not been validated on real mapper data.
 
+With an HC-SR04 strapped to the phone ([guide](hardware/hcsr04/README.md)),
+`SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper` adds a sonar
+cross-check: the viewer shows the sonar and LiDAR distances side by side and
+marks, in magenta, surfaces only the sonar can detect, such as glass.
+`SONAR_SIM=1 scripts/run-lidar.sh --mapper-sim` shows it with simulated
+readings. Not yet run on hardware.
+
 With nothing running, `node serve.js` shows the viewer on built-in mock data.
 
 ### Two LiDAR paths, one port
@@ -212,6 +219,7 @@ replacement, telemetry, invalid message handling and disconnect recovery.
 | `src/mapper-adapter.js`, `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js` | Mapper adapter, spatial memory, room classification, floor plan, audio cues | Ryan |
 | `test/` | Viewer tests, including the scan simulator | viewer and Ryan |
 | `docs/` | [Demo plan](docs/DEMO.md) | Ryan |
+| `hardware/hcsr04/` | HC-SR04 sonar: firmware, [wiring and mounting guide](hardware/hcsr04/README.md) | Ryan |
 | `scripts/` | Setup and run helpers | shared |
 | `acoustic/`, `sonar-ml/` | Earlier sonar work, simulated data only | Ryan, Rishi |
 
