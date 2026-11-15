@@ -29,7 +29,7 @@ export function decodeRange(payload) {
 
 export function rangeLabel(update) {
   const source = {hardware:'Hardware',manual:'Manual',synthetic:'SYNTHETIC'}[update.observation.source];
-  return update.delivery === 'replay' ? `REPLAY ? ${source}` : source;
+  return update.delivery === 'replay' ? `REPLAY · ${source}` : source;
 }
 
 export function createRangeState({ maxSensors = 32, historySize = 20 } = {}) {
@@ -62,9 +62,9 @@ export function mountRangePanel(root, { url = 'ws://127.0.0.1:8765/range/view', 
     rows.replaceChildren();
     for (const {update, history} of state.values()) {
       const o = update.observation, s = update.statistics, card = doc.createElement('article');
-      const title = doc.createElement('h2'); title.textContent = `${o.sensor_id} ? ${rangeLabel(update)}`;
+      const title = doc.createElement('h2'); title.textContent = `${o.sensor_id} · ${rangeLabel(update)}`;
       const reading = doc.createElement('strong'); reading.textContent = o.valid ? `${o.distance_m.toFixed(3)} m` : `Unavailable: ${o.status}`;
-      const detail = doc.createElement('p'); detail.textContent = `${o.sensor_model} ? calibration ${o.calibration_status} ? median ${s.available ? s.median_m.toFixed(3)+' m' : 'withheld'} ? spread ${s.spread_m === null ? 'n/a' : s.spread_m.toFixed(3)+' m'} ? misses ${s.missing_count}/${s.sample_count} ? outliers ${s.outlier_count}`;
+      const detail = doc.createElement('p'); detail.textContent = `${o.sensor_model} · calibration ${o.calibration_status} · median ${s.available ? s.median_m.toFixed(3)+' m' : 'withheld'} · spread ${s.spread_m === null ? 'n/a' : s.spread_m.toFixed(3)+' m'} · misses ${s.missing_count}/${s.sample_count} · outliers ${s.outlier_count}`;
       const clock = doc.createElement('p'); clock.textContent = `Timestamp ${o.capture_timestamp} (${o.timestamp_basis}); sequence ${o.sequence}`;
       const recent = doc.createElement('p'); recent.textContent = 'Recent: '+history.map(h => h.distance_m === null ? h.status : h.distance_m.toFixed(3)+' m').join(' | ');
       card.append(title, reading, detail, clock, recent); rows.append(card);
@@ -77,7 +77,7 @@ export function mountRangePanel(root, { url = 'ws://127.0.0.1:8765/range/view', 
         onStatus: value => {status.textContent = `Range ${value}`;},
         onInvalid: () => {status.textContent = 'Malformed range message rejected';},
         onFrame: frame => {
-          if (frame.rangeStatus) {status.textContent = `${frame.rangeStatus.mode} ? adapter ${frame.rangeStatus.publisher_connected ? 'connected' : 'disconnected'}`; return;}
+          if (frame.rangeStatus) {status.textContent = `${frame.rangeStatus.mode} · adapter ${frame.rangeStatus.publisher_connected ? 'connected' : 'disconnected'}`; return;}
           if (state.accept(frame.range)) render();
         }});
     },

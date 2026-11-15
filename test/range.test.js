@@ -7,7 +7,7 @@ const frame = (sequence=0) => ({type:'range_update',schema_version:1,delivery:'s
 test('independent measured-range decoder preserves provenance without geometry',()=>{
  const result=decodeRange(JSON.stringify(frame())); assert.equal(result.range.observation.distance_m,1.2);
  assert.equal(rangeLabel(result.range),'SYNTHETIC'); assert.equal(result.points,undefined);
- const replay={...frame(),delivery:'replay'}; assert.equal(rangeLabel(decodeRange(JSON.stringify(replay)).range),'REPLAY ? SYNTHETIC');
+ const replay={...frame(),delivery:'replay'}; assert.equal(rangeLabel(decodeRange(JSON.stringify(replay)).range),'REPLAY · SYNTHETIC');
 });
 test('missing returns display as unavailable, never zero',()=>{
  const raw=frame(); Object.assign(raw.observation,{distance_m:null,status:'timeout',valid:false,timed_out:true});
