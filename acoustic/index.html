@@ -3,20 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101b18">
+  <meta name="theme-color" content="#090d14">
   <title>EchoSense</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
     <header class="masthead">
-      <h1>Echo<span>Sense</span></h1>
-      <p>Acoustic room scan</p>
-      <a class="viewer-link" href="/">WebGL viewer &amp; Saved Maps</a>
+      <a class="brand" href="/">
+        <img src="/logo.svg" alt="" width="33" height="33">
+        <span>Echo<span>Sense</span></span>
+      </a>
+      <nav aria-label="EchoSense views">
+        <a class="viewer-link" href="/">Sonar viewer</a>
+        <a href="./" aria-current="page">Acoustic scan</a>
+      </nav>
     </header>
     <section class="map-section" aria-labelledby="map-title">
       <div class="section-heading">
-        <h2 id="map-title">3D room scan</h2>
+        <div>
+          <h1 id="map-title">Acoustic room scan</h1>
+          <p class="subtitle">Map reflected sound and check distances from your position.</p>
+        </div>
         <span id="source" class="source" hidden></span>
       </div>
       <div class="toolbar">
@@ -29,11 +37,6 @@
         </label>
       </div>
       <p id="map-message" class="message" role="status">Open a scan report to plot your measurements.</p>
-      <section id="scan-quality" class="scan-quality" aria-labelledby="quality-title" hidden>
-        <h3 id="quality-title">Scan quality</h3>
-        <p id="quality-summary"></p>
-        <ul id="quality-results" aria-label="Panel test results"></ul>
-      </section>
       <div id="map-body" hidden>
         <div class="layout">
           <div class="view-controls">
@@ -70,6 +73,15 @@
         </div>
         <ul id="readings" aria-label="Distances to visible acoustic returns"></ul>
         <p class="footnote">Set your position manually. Distances are straight lines to the closest estimated echo in each group. Open space may be unscanned.</p>
+        <section id="scan-quality" class="scan-quality" aria-labelledby="quality-title" hidden>
+          <h3 id="quality-title">Scan quality</h3>
+          <dl class="quality-metrics" id="quality-summary">
+            <div><dt>Usable readings</dt><dd id="quality-usable"></dd></div>
+            <div><dt>Mapped positions</dt><dd id="quality-mapped"></dd></div>
+            <div><dt>Mean tape error</dt><dd id="quality-error"></dd><dd id="quality-references"></dd></div>
+          </dl>
+          <ul id="quality-results" aria-label="Panel test results"></ul>
+        </section>
       </div>
     </section>
     <details class="capture">

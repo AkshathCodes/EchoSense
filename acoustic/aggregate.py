@@ -192,10 +192,11 @@ def quality_chart(source: Source, rows: list[SceneQuality]) -> str:
             f'<small>{row["mapped_poses"]}/{row["poses"]} scan poses mapped &middot; {accuracy}</small></div>'
         )
     return (
-        '<style>.echo{font:16px system-ui,sans-serif;background:#11211d;color:#eff7ed;padding:24px;'
-        'border-radius:12px;max-width:850px}.echo h2{margin:0 0 6px}.echo small,.echo p{color:#c0d4c8}'
-        '.echo .scene{margin-top:20px}.echo .track{height:10px;background:#344940;margin:6px 0;border-radius:5px}'
-        '.echo .bar{height:100%;background:#b4f1ab;border-radius:5px}</style>'
+        '<style>.echo{font:16px Segoe UI,system-ui,sans-serif;background:#101720;color:#dfebf3;padding:24px;'
+        'border:1px solid #293745;border-radius:8px;max-width:850px}.echo h2{margin:0 0 6px}'
+        '.echo small,.echo p{color:#a5b7c7}.echo .scene{margin-top:20px}'
+        '.echo .track{height:10px;background:#293745;margin:6px 0;border-radius:5px}'
+        '.echo .bar{height:100%;background:#79d1f8;border-radius:5px}</style>'
         f'<section class="echo"><h2>Acoustic scan coverage</h2><p>{source.title()} data</p>'
         + "".join(figures) + "</section>"
     )

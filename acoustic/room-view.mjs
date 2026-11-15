@@ -1,6 +1,6 @@
 const colors = {
-  floor: "#233a34", grid: "#365149", scan: "#84b8ba", hit: "#b4f1ab",
-  invalid: "#ffd596", person: "#f6d887", selected: "#f4ffdd",
+  floor: "#162738", grid: "#314b61", scan: "#8c9fb0", hit: "#79d1f8",
+  invalid: "#edb467", person: "#f6d887", selected: "#e6f7ff",
 };
 
 export const initialView = Object.freeze({ yaw: -0.55, tilt: 0.57, zoom: 1 });
@@ -99,7 +99,7 @@ function drawLabel(context, width, point, content, color) {
   const textWidth = context.measureText(content).width;
   const x = Math.max(6, Math.min(width - textWidth - 13, point.x - textWidth / 2));
   const y = Math.max(6, point.y - 30);
-  context.fillStyle = "#0e1917";
+  context.fillStyle = "#0c121a";
   context.fillRect(x - 5, y, textWidth + 10, 23);
   context.fillStyle = color;
   context.fillText(content, x, y + 16);
@@ -120,7 +120,7 @@ export function drawRoom(canvas, model, person, view, selectedKey) {
   const patches = model.patches.map(({ key, vertices }) => ({ key, points: vertices.map(project) }))
     .sort((a, b) => b.points[0].depth - a.points[0].depth);
   for (const patch of patches) {
-    polygon(context, patch.points, patch.key === selectedKey ? "#abf7ab46" : "#a2e1aa24", "#8bd69b75");
+    polygon(context, patch.points, patch.key === selectedKey ? "#79d1f846" : "#79d1f824", "#79d1f875");
   }
   for (const { pose, valid } of model.stations) {
     const marker = project({ x: pose.x, y: 0, z: pose.z });
@@ -145,7 +145,7 @@ export function drawRoom(canvas, model, person, view, selectedKey) {
     drawLabel(context, width, end, `${target.distance.toFixed(2)} m`, colors.selected);
   }
   dot(context, position, 7, colors.person);
-  dot(context, position, 3, "#26332b");
+  dot(context, position, 3, "#162738");
   drawLabel(context, width, position, "You", colors.person);
   return hits;
 }

@@ -118,17 +118,25 @@ function showQuality(points) {
   const usable = points.reduce((count, point) => count + point.accepted, 0);
   const total = points.reduce((count, point) => count + point.total, 0);
   const errors = mapped.flatMap((point) => point.error_m === null ? [] : [point.error_m]);
-  const meanError = errors.reduce((sum, error) => sum + error, 0) / errors.length;
-  const accuracy = errors.length ? ` · ${(meanError * 100).toFixed(1)} cm mean error across ${errors.length} mapped tape references` : "";
-  byId("quality-summary").textContent = `${usable}/${total} usable readings · ${mapped.length}/${points.length} mapped positions${accuracy}`;
+  const meanError = errors.length ? errors.reduce((sum, error) => sum + error, 0) / errors.length : null;
+  byId("quality-usable").textContent = `${usable}/${total}`;
+  byId("quality-mapped").textContent = `${mapped.length}/${points.length}`;
+  byId("quality-error").textContent = meanError === null ? "Unavailable" : `${(meanError * 100).toFixed(1)} cm`;
+  byId("quality-references").textContent = errors.length ? `${errors.length} mapped tape references` : "Add tape references";
   const results = [];
   for (const { scene } of Object.values(panelCases)) {
     const batches = points.filter((point) => point.scene === scene);
     for (const point of batches) {
       const row = document.createElement("li");
-      const expected = point.reference_m === null ? "" : ` · Tape ${point.reference_m.toFixed(2)} m`;
-      const actual = point.range_m === null ? "Uncertain" : `${point.range_m.toFixed(2)} m return`;
-      row.textContent = `${scene} · ${actual}${expected} · ${point.accepted}/${point.total} usable`;
+      const name = document.createElement("span");
+      name.textContent = scene;
+      const actual = document.createElement("strong");
+      actual.textContent = point.range_m === null ? "Uncertain" : `${point.range_m.toFixed(2)} m`;
+      if (point.range_m === null) actual.className = "quality-uncertain";
+      const detail = document.createElement("small");
+      const expected = point.reference_m === null ? "" : `Tape ${point.reference_m.toFixed(2)} m · `;
+      detail.textContent = `${expected}${point.accepted}/${point.total} usable`;
+      row.append(name, actual, detail);
       results.push(row);
     }
   }

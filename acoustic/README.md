@@ -30,3 +30,19 @@ On the scanner laptop, use desktop Chrome at `http://127.0.0.1:4173/acoustic/`. 
 5. Verify USB capture with the selected board and the same panel test. The separate [SonarFrame pipeline](../sonar-ml/docs/interfaces/sonar-frame.md) still needs its hardware driver and real captures for the live WebGL headset route.
 
 The laptop timing window covers a roughly 192 ms delay observed during a live check. That retry returned 0.66 m five times, close to the lower end of the laptop detector's range. A known-distance panel test is still needed to identify the reflector and verify ranging accuracy.
+
+## Train and replay the sonar classifier
+
+From the repository root, use Python 3.11 or later in a project virtual environment:
+
+```sh
+python -m pip install -e ./sonar-ml/perception -e "./websocket-bridge[recorded]"
+python acoustic/train_demo_model.py ./sonar-ml/data/judge-model --train-scenes 240 --validation-scenes 80 --test-scenes 120
+python -m sonar_bridge --origin http://127.0.0.1:4173 --manifest ./sonar-ml/data/judge-model/replay/manifest.jsonl --fps 2
+```
+
+Open the room viewer and connect to `ws://127.0.0.1:8765/ws`. The viewer labels the stream as simulated replay. The training script saves a random-forest checkpoint, test metrics, and the paired frames and detections consumed by the bridge. It chooses forest parameters using validation macro F1 and tunes the person class weight using object-level F2 on a separate validation set. The held-out metrics in `model-evaluation.json` include recall and precision, plus the results for the current forest with its documented person weight of 2.
+
+Use the laptop or USB panel test for measured distances. The classifier scores and replay come from the sonar simulator.
+
+In the documented 120-scene held-out simulation, the tuned model found 79 of 127 person-sized objects and raised 51 false alarms. The current forest with its documented person weight of 2 found 77 of 127 and raised 34 false alarms. The extra false alarms outweighed the recall gain on F2, so keep the current forest as the default. The tuned replay remains available for comparison.
