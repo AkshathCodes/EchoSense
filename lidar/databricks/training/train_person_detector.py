@@ -35,6 +35,22 @@ spec.loader.exec_module(D)
 spark = SparkSession.builder.getOrCreate()
 ns = f"{a.catalog}.{a.schema}"
 
+# MLflow is set up first so a tracking problem fails in seconds, not after the evaluation.
+# The registry URI must be set before anything else: on serverless, MLflow otherwise tries to read
+# a Spark setting (spark.mlflow.modelRegistryUri) that serverless does not expose.
+import os  # noqa: E402
+
+os.environ.setdefault("MLFLOW_TRACKING_URI", "databricks")
+os.environ.setdefault("MLFLOW_REGISTRY_URI", "databricks-uc")
+import mlflow  # noqa: E402
+from mlflow.models import infer_signature  # noqa: E402
+
+mlflow.set_tracking_uri("databricks")
+mlflow.set_registry_uri("databricks-uc")
+user = spark.sql("SELECT current_user()").first()[0]
+mlflow.set_experiment(f"/Users/{user}/echosense-person-detector")
+print("MLflow experiment ready")
+
 sessions = (spark.table(f"{ns}.silver_lidar_sessions")
             .where("scene IS NOT NULL AND scene <> ''")       # never labelled: can't be called a negative
             .select("session_id", "source_file", "scene", "room", "lights", "data_origin",
@@ -68,12 +84,6 @@ for label, use_synth in (("real_plus_synthetic", True), ("real_only", False)):
     results[label] = (rows, D.summarize(rows))
     print(label, results[label][1])
 
-import mlflow  # noqa: E402
-from mlflow.models import infer_signature  # noqa: E402
-
-user = spark.sql("SELECT current_user()").first()[0]
-mlflow.set_experiment(f"/Users/{user}/echosense-person-detector")
-mlflow.set_registry_uri("databricks-uc")
 model = D.fit(scans)
 with mlflow.start_run(run_name="person-detector-v0") as run:
     mlflow.log_params({"cell_m": D.CELL, "features": len(D.FEATURES), "trees": model.n_estimators,
