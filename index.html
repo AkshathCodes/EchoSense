@@ -81,6 +81,9 @@
           </div>
         </div>
         <section class="connection" aria-label="Data connection">
+          <label class="row" id="feed-mode-row">Sensor feed
+            <select id="feed-mode"><option value="sonar">Sonar / Preview</option><option value="lidar">iPhone LiDAR</option></select>
+          </label>
           <div class="row"><span>Connection</span><strong id="connection-state" role="status">Local preview</strong></div>
           <form id="connection-form">
             <label class="sr-only" for="address">WebSocket URL</label>
@@ -88,6 +91,15 @@
             <button id="connect" type="submit">Connect</button>
           </form>
           <p id="connection-note">Start the bridge, then connect.</p>
+          <div id="lidar-controls" hidden>
+            <div class="lidar-actions">
+              <button id="lidar-pause" type="button" disabled>Pause display</button>
+              <button id="lidar-clear" type="button" disabled>Clear view</button>
+            </div>
+            <label class="row lidar-file">Open LiDAR replay
+              <input type="file" id="lidar-file" accept=".jsonl,application/jsonl,application/x-ndjson">
+            </label>
+          </div>
         </section>
         <section class="controls inspection" aria-label="Inspection tools">
           <div class="toggles">
@@ -103,6 +115,7 @@
     </aside>
 
     <div id="target-marker" class="target-marker" hidden><i></i>Estimated zone</div>
+    <div id="scanner-marker" class="target-marker scanner-marker" hidden><i></i>Scanner</div>
     <div id="anchor-labels" aria-hidden="true"></div>
     <aside id="camera-hud" class="camera-hud" aria-label="Camera heading and scene overview" hidden>
       <div><span>Heading</span> <strong id="heading">000°</strong></div>
@@ -130,10 +143,15 @@
       <button type="button" id="reset-view" aria-label="Reset view" title="Reset view">⌂</button>
     </div>
 
-    <div class="legend" aria-label="Scan legend">
+    <div class="legend" id="sonar-legend" aria-label="Scan legend">
       <span><i class="blue"></i>Surface returns</span>
       <span><i class="amber"></i>Person estimate</span>
       <span><i class="green"></i>RF anchors</span>
+    </div>
+    <div class="legend lidar-legend" id="lidar-legend" aria-label="LiDAR observation legend" hidden>
+      <span><i class="blue"></i>Observed returns</span>
+      <span id="path-legend" hidden><i class="green"></i>Scanner path</span>
+      <span>Blank = unknown · Coverage and safety are unverified</span>
     </div>
   </main>
 
@@ -143,7 +161,8 @@
       <span>Frame <strong id="frame">—</strong></span>
       <span><span id="signal-label">Latency</span> <strong id="latency">—</strong></span>
       <span id="capture-clock" hidden>Capture time <strong id="capture-time">—</strong></span>
-      <span>Confidence <strong id="estimate">Unknown</strong></span>
+      <span><span id="estimate-label">Confidence</span> <strong id="estimate">Unknown</strong></span>
+      <span id="retained-count" hidden>Observed points <strong id="retained">—</strong></span>
     </div>
     <p id="camera-help">Drag to orbit <b>·</b> Shift + drag to pan <b>·</b> Scroll to zoom</p>
   </footer>

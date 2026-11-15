@@ -67,7 +67,7 @@ function makeGrid() {
   return new Float32Array(vertices);
 }
 
-function makeSignals(time, target, ringLayer, trail) {
+function makeSignals(time, target, ringLayer, trail, scanner, scannerPath) {
   const data = [];
   const line = (a, b, col) => data.push(...a, ...col, ...col, ...b, ...col, ...col);
   const circle = ([x, y, z], radius, color, dashed = false) => {
@@ -104,6 +104,15 @@ function makeSignals(time, target, ringLayer, trail) {
     line(foot(previous.target.position), foot(sample.target.position), color);
     circle(foot(sample.target.position), 0.09, color);
   });
+  const green = [0.27, 0.93, 0.68];
+  scannerPath?.forEach((position, i) => {
+    if (position && scannerPath[i - 1]) line(scannerPath[i - 1], position, green);
+  });
+  if (scanner) {
+    const [x, y, z] = scanner;
+    circle(scanner, 0.12, green);
+    line([x, y - 0.1, z], [x, y + 0.1, z], green);
+  }
   return new Float32Array(data);
 }
 
@@ -130,7 +139,7 @@ export function createViewer(canvas, room, onCamera = () => {}, onReset) {
   const changes = gl.createBuffer();
   let changeCount = 0;
   let cloud = samples, cloudCount = room.cloud.length / 9, demoGeometry = true;
-  let lastSignalTime, lastTarget, lastRings, lastTrail, signalCount = 0, projection;
+  let lastSignalTime, lastTarget, lastRings, lastTrail, lastScanner, lastPath, signalCount = 0, projection;
   const events = new AbortController();
   const listen = (type, listener, options) =>
     canvas.addEventListener(type, listener, { ...options, signal: events.signal });
@@ -290,7 +299,7 @@ export function createViewer(canvas, room, onCamera = () => {}, onReset) {
       return [(sx + 1) * 50, (1 - sy) * 50];
     },
     draw({ mode, pointSize, pointCap, showGrid, rings, target, time, meshTint,
-      heightRange = [-10001, 10001], changeOverlay = false, trail, dimensions, comparison = false }) {
+      heightRange = [-10001, 10001], changeOverlay = false, trail, scanner, scannerPath, dimensions, comparison = false }) {
       const mobile = !dimensions && canvas.clientWidth < 650;
       const ratio = dimensions ? 1 : Math.min(devicePixelRatio, 2);
       const width = dimensions?.[0] ?? Math.max(1, Math.round(canvas.clientWidth * ratio));
@@ -331,14 +340,18 @@ export function createViewer(canvas, room, onCamera = () => {}, onReset) {
       }
       if (changeOverlay) drawBuffer(changes, changeCount, gl.POINTS, 0, 1);
       gl.uniform2f(uniforms.heightRange, -10001, 10001);
-      if (lastSignalTime !== time || lastTarget !== target || lastRings !== rings || lastTrail !== trail) {
-        const data = makeSignals(time, target, rings, trail);
+      const signalTime = target || rings ? time : 0;
+      if (lastSignalTime !== signalTime || lastTarget !== target || lastRings !== rings || lastTrail !== trail ||
+          lastScanner !== scanner || lastPath !== scannerPath) {
+        const data = makeSignals(time, target, rings, trail, scanner, scannerPath);
         upload(data, gl.DYNAMIC_DRAW, signals);
         signalCount = data.length / 9;
-        lastSignalTime = time;
+        lastSignalTime = signalTime;
         lastTarget = target;
         lastRings = rings;
         lastTrail = trail;
+        lastScanner = scanner;
+        lastPath = scannerPath;
       }
       drawBuffer(signals, signalCount, gl.LINES, 0, 0.83);
     },

@@ -1,6 +1,7 @@
 import { comparable, compareReturns } from './archive.js';
 import { createViewer } from './viewer.js';
 import { sonarLabel } from './sonar.js';
+import { lidarLabel } from './lidar.js';
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const format = new Intl.NumberFormat('en-US');
@@ -58,7 +59,8 @@ export function createLibrary({ show, open, scan }) {
     const thumb = node('img');
     thumb.src = map.thumb;
     thumb.alt = '';
-    const badge = node('span', map.sonar ? sonarLabel(map.sonar) : map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
+    const badge = node('span', map.lidar ? lidarLabel(map.lidar) : map.sonar ? sonarLabel(map.sonar)
+      : map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
     badge.dataset.source = map.source;
     preview.append(thumb, badge);
     const info = node('div', '', 'map-info');
@@ -173,7 +175,7 @@ function mountComparison([first, second]) {
   el('second-map').textContent = second.name;
   const viewers = [];
   let fitPoints;
-  if (!aligned && (first.sonar || second.sonar)) {
+  if (!aligned && (first.sonar || second.sonar || first.lidar || second.lidar)) {
     fitPoints = new Float32Array(first.points.length + second.points.length);
     fitPoints.set(first.points);
     fitPoints.set(second.points, first.points.length);

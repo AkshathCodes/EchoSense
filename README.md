@@ -1,8 +1,8 @@
 # EchoSense
 
-EchoSense maps a room you cannot see. An iPhone's LiDAR scanner is the live
-sensor and this interactive viewer shows the scan. The UI
-starts with **Mock data**, a modeled living room and simulated sensor readings.
+EchoSense is a spatial memory prototype for controlled search-and-rescue
+planning demos. Its viewer shows surfaces observed by an iPhone LiDAR scanner.
+The UI starts with **Mock data**, a modeled living room and simulated readings.
 
 > **Sensor change (Nov 14):** the sonar hardware is no longer available. The
 > live sensor is now an iPhone's LiDAR scanner. See
@@ -101,16 +101,53 @@ python -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/python -B -m sonar_bridge --lidar --origin http://127.0.0.1:4173
 ```
 
-Build the app from `ios/EchoSenseLiDAR.xcodeproj`, enter the address the
-bridge prints, then click **Connect** in the viewer. The source badge reads
-**Live LiDAR**. The study line reads "Phone-relative scan" in Live mode and
-"Room map" when the phone sends its accumulated map. The signal readout shows
-mean ARKit depth confidence. Build steps, the two modes, and what does and
-does not work in a dark room are in [ios/README.md](ios/README.md). To drive
-the viewer without a phone, run `python -B fake_phone.py` in
-`websocket-bridge/`.
+Build the app from `ios/EchoSenseLiDAR.xcodeproj` and enter the laptop address
+printed by the bridge. In the browser, select **iPhone LiDAR** in **Sensor feed**,
+then **Start session**. Leave the address at `ws://127.0.0.1:8765/ws` when the
+browser runs on the bridge laptop. The phone and laptop need to be reachable
+on the same trusted network. See [ios/README.md](ios/README.md) for signing,
+installation and phone settings.
 
-The app has not been compiled yet; it was written on a machine without Xcode.
+- Use **Live** on the phone for a phone-relative depth view. Choose **Room map**
+  to see the phone's accumulated observations. In this mode, scan a fixed
+  object, turn away, and check that its points remain. The browser shows
+  connection status, ARKit tracking, mean depth confidence out of 2, and the
+  number of retained points. Blank areas are unknown; even observed surfaces
+  do not establish a safe or fully searched room.
+- **Pause display** freezes the view and skips frames until resumed.
+  **Disconnect** keeps the latest view for inspection or saving. **Clear view**
+  clears this browser's copy and holds it empty until you resume. When you
+  resume, a connected phone can repopulate it from its own map. Reset the
+  Room map on the phone to reset the collection itself.
+- **Save snapshot** keeps the latest view and up to 12 one-second samples from
+  this browser session in **Saved Maps**. Open the snapshot and use the replay
+  timeline to inspect it. **Open LiDAR replay** also accepts a local JSONL file
+  containing captured browser relay envelopes, one per line in capture order
+  (up to 16 MB). It does not accept the raw phone messages or sonar NPZ
+  manifests. Browser snapshots and replay files require no cloud service.
+- No phone required for a transport check: run `python -B fake_phone.py --fps 3`
+  in `websocket-bridge/` while the LiDAR relay runs. Expect 403 points and the
+  **Synthetic LiDAR · controlled demo** badge. This fixture is phone-relative.
+  For a browser-only check, open
+  [the synthetic Room map JSONL](test/fixtures/lidar-room-synthetic.jsonl)
+  with **Open LiDAR replay** and press **Replay**. Over four seconds, the
+  wall remains as a second wall and an obstacle come into view.
+
+The checkout's [relay format](websocket-bridge/PROTOCOL.md#live-lidar-relay---lidar-added-nov-14)
+uses `/ingest` and `/ws` with a LiDAR-tagged bridge envelope. The adapter in
+`src/lidar.js` converts its `[forward, left, up]` coordinates to
+`[-left, up, -forward]` in meters. Native ARKit world XYZ can use the renderer's
+Y-up axes unchanged. The relay does not include a camera transform or an
+origin/session ID. The viewer therefore replaces its copy with each phone
+snapshot. It will need the agreed session-aware stream to draw a real scanner
+path or accumulate individual frames safely across movement. The frontend
+path and bounded observation buffer accept normalized, session-tagged
+observations, but the current relay supplies neither.
+
+Before judging, validate the physical iPhone build, check a tape-measured
+object and the expected up/forward directions, change to Room map and verify
+retention while turning away, then save and replay that real scan. The local
+synthetic test does not verify the physical iPhone or its metric accuracy.
 
 ## Backend handoff
 
@@ -124,7 +161,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -B -m sonar_bridge --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/` and click **Connect**. The default address is
+Open `http://127.0.0.1:4173/`, select **Sonar / Preview** and click **Connect**. The default address is
 `ws://127.0.0.1:8765/ws`. Match `--origin` to the exact frontend host and port
 if you use a different URL. The default bridge stream is a simulated 45-point
 wall with no model detections. For NPZ recordings with optional detection JSON,
