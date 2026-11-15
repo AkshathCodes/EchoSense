@@ -83,7 +83,7 @@ def silver_lidar_sessions():
         F.col("j.labels")["scene"].alias("scene"), "j.map_source",
         # 'synthetic' = target inserted into a real empty-room scan (ADR-0018); filter on it for evaluation
         F.coalesce(F.col("j.labels")["data_origin"], F.lit("real")).alias("data_origin"),
-        F.coalesce(F.size("j.annotations"), F.lit(0)).alias("n_annotations"), "j.annotations",
+        F.greatest(F.size("j.annotations"), F.lit(0)).alias("n_annotations"), "j.annotations",
         "ingested_at")
 
 
