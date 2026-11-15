@@ -40,7 +40,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .   # needs Python 3.11 or lat
 .venv/bin/python -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/` and click **Connect** (the address defaults to
+Open `http://127.0.0.1:4173/`, select **iPhone LiDAR**, and click **Connect** (the address defaults to
 `ws://127.0.0.1:8765/lidar/view`). Then publish frames from the phone
 ([ios-lidar/README.md](ios-lidar/README.md)) or, with no phone, from the
 labeled synthetic publisher: `.venv/bin/python -B fake_phone.py` in `websocket-bridge/`.
@@ -49,8 +49,8 @@ What the viewer adds on top of the point cloud:
 
 - **Persistence.** Points are kept in a 5 cm voxel grid (`src/spatial-memory.js`),
   capped at 120,000 cells, so geometry stays after the scanner turns away.
-- **Scanner path.** The orange trail and marker are the scanner's own
-  recorded positions.
+- **Scanner path.** The green trail and marker show the scanner's recorded
+  positions. The path breaks across tracking loss and paused display updates.
 - **Coverage map.** A plan view in 25 cm cells: *Surface* (a return landed
   there above floor level), *Seen through* (a sensor ray crossed it), and
   *Not observed*. A cell counts as seen if one ray crossed it at any height,
@@ -71,7 +71,9 @@ What the viewer adds on top of the point cloud:
   **Download PNG** saves it. Objects are measured, not identified.
 - **Audio cues** (off by default): session started, tracking lost and
   restored, phone connected and lost, snapshot saved, replay complete.
-- **Clear map** and **Pause** for the display, and **Save snapshot** as before.
+- **Pause display** skips browser updates while the bridge keeps recording.
+  **Clear map** holds the browser map empty until you resume. **Disconnect**
+  preserves the last scan for **Save snapshot** and review in Saved Maps.
 
 The source badge reads **Live LiDAR** only for `source: arkit_scene_depth`
 frames in live mode. Synthetic frames read **Simulated LiDAR**, and bridge
@@ -82,6 +84,11 @@ Replay a recorded session:
 ```sh
 .venv/bin/python -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
 ```
+
+Connect to that replay bridge, or choose the bridge's JSONL file (up to 16 MB)
+with **Open LiDAR replay**. Use **Room analysis** during scanning or replay to
+inspect the current observations and export the floor plan. Saved maps retain
+surface colors and keep different ARKit coordinate sessions separate.
 
 How well it does, on simulation only (`test/scan-simulator.js` ray-casts a
 furnished room at the phone's sampling density with range noise and stray
@@ -237,7 +244,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -B -m sonar_bridge --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/`, set the address to `ws://127.0.0.1:8765/ws`, and click
+Open `http://127.0.0.1:4173/`, select **Sonar / Preview**, and click
 **Connect**. Match `--origin` to the exact frontend host and port
 if you use a different URL. The default bridge stream is a simulated 45-point
 wall with no model detections. For NPZ recordings with optional detection JSON,

@@ -81,6 +81,11 @@
           </div>
         </div>
         <section class="connection" aria-label="Data connection">
+          <label class="row" id="feed-mode-row">Sensor feed
+            <select id="feed-mode">
+              <option value="lidar">iPhone LiDAR</option><option value="sonar">Sonar / Preview</option>
+            </select>
+          </label>
           <div class="row"><span>Connection</span><strong id="connection-state" role="status">Local preview</strong></div>
           <form id="connection-form">
             <label class="sr-only" for="address">WebSocket URL</label>
@@ -88,6 +93,9 @@
             <button id="connect" type="submit">Connect</button>
           </form>
           <p id="connection-note">Start the bridge, then connect.</p>
+          <label class="row lidar-file" id="lidar-file-row">Open LiDAR replay
+            <input type="file" id="lidar-file" accept=".jsonl,application/jsonl,application/x-ndjson">
+          </label>
         </section>
         <section id="lidar-panel" class="controls lidar-panel" aria-label="LiDAR spatial memory" hidden>
           <div class="row"><span>Observed floor area</span><strong id="lidar-observed">0.0 m²</strong></div>
@@ -98,7 +106,7 @@
           <p class="caveat">Not observed means no measurement. It does not mean empty, clear or safe.</p>
           <div class="lidar-actions">
             <button id="lidar-clear" type="button">Clear map</button>
-            <button id="lidar-pause" type="button" aria-pressed="false">Pause</button>
+            <button id="lidar-pause" type="button" aria-pressed="false">Pause display</button>
             <button id="lidar-analyse" type="button">Room analysis</button>
             <label><input id="lidar-audio" type="checkbox"> Audio cues</label>
           </div>
@@ -125,6 +133,7 @@
       </div>
     </section>
     <div id="target-marker" class="target-marker" hidden><i></i>Estimated zone</div>
+    <div id="scanner-marker" class="target-marker scanner-marker" hidden><i></i>Scanner</div>
     <div id="anchor-labels" aria-hidden="true"></div>
     <aside id="camera-hud" class="camera-hud" aria-label="Camera heading and scene overview" hidden>
       <div><span>Heading</span> <strong id="heading">000°</strong></div>
@@ -137,6 +146,7 @@
     </div>
     <section id="replay" class="replay-bar" aria-label="Saved scan replay" hidden>
       <div class="replay-head"><strong id="replay-name"></strong>
+        <button id="replay-analyse" type="button" hidden>Room analysis</button>
         <button id="back-library" type="button">Back to Saved Maps</button></div>
       <div class="replay-timeline"><button id="play-replay" type="button">Play</button>
         <label class="sr-only" for="playhead">Replay position</label>
@@ -152,10 +162,15 @@
       <button type="button" id="reset-view" aria-label="Reset view" title="Reset view">⌂</button>
     </div>
 
-    <div class="legend" aria-label="Scan legend">
+    <div class="legend" id="sonar-legend" aria-label="Scan legend">
       <span><i class="blue"></i>Surface returns</span>
       <span><i class="amber"></i>Person estimate</span>
       <span><i class="green"></i>RF anchors</span>
+    </div>
+    <div class="legend lidar-legend" id="lidar-legend" aria-label="LiDAR observation legend" hidden>
+      <span><i class="blue"></i>Observed returns</span>
+      <span><i class="green"></i>Scanner path</span>
+      <span>Blank = unknown · Safety unverified</span>
     </div>
   </main>
 
@@ -165,7 +180,7 @@
       <span>Frame <strong id="frame">—</strong></span>
       <span><span id="signal-label">Latency</span> <strong id="latency">—</strong></span>
       <span id="capture-clock" hidden>Capture time <strong id="capture-time">—</strong></span>
-      <span>Confidence <strong id="estimate">Unknown</strong></span>
+      <span><span id="estimate-label">Confidence</span> <strong id="estimate">Unknown</strong></span>
     </div>
     <p id="camera-help">Drag to orbit <b>·</b> Shift + drag to pan <b>·</b> Scroll to zoom</p>
   </footer>

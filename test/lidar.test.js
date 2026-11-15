@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSpatialMemory, SEEN, SURFACE } from '../src/spatial-memory.js';
-import { createLidarSession, lidarLabel } from '../src/lidar.js';
+import { createLidarSession, lidarLabel, readLidarReplay } from '../src/lidar.js';
 import { createCues, cueNames } from '../src/audio-cues.js';
+import { classifyRoom, colorsFor } from '../src/room-classifier.js';
 
 // SYNTHETIC fixtures. None of this is real sensor data.
 const pose = (x, y, z) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
@@ -64,12 +65,12 @@ test('session decodes frames, accumulates across them and lifts the floor to y =
   assert.equal(first.points.length, 6);             // two of three points share a voxel
   assert.equal(first.lidar.simulated, true);
   assert.equal(lidarLabel(first.lidar), 'Simulated LiDAR');
-  assert.equal(+first.target.position[1].toFixed(2), 1.3);        // scanner 1.3 m above lowest point
+  assert.equal(+first.lidar.scanner[1].toFixed(2), 1.3);        // scanner 1.3 m above lowest point
   assert.ok(Math.abs(Math.min(...[...first.points].filter((_, i) => i % 3 === 1))) < 1e-6);
   const second = await session.decode(message({ sequence: 1, camera_to_world: pose(1, 0, 0),
     points: [[3, 0, -2]], confidences: [2] }));
   assert.equal(second.points.length, 9);            // earlier geometry is still there
-  assert.equal(second.lidar.trail.length, 2);
+  assert.equal(second.lidar.path.length, 2);
   assert.deepEqual(events, ['session_started']);
 });
 
@@ -82,8 +83,8 @@ test('tracking loss, recovery, new sessions and bridge status raise events', asy
   await session.decode(message({ sequence: 2 }));
   const fresh = await session.decode(message({ session_id: 's2', points: [[0, 0, -1]], confidences: [2] }));
   assert.equal(fresh.points.length, 3);             // the old origin's map is not merged
-  await session.decode('{"type":"lidar_status","schema_version":1,"mode":"live","publisher_connected":true}');
-  const replay = await session.decode('{"type":"lidar_status","schema_version":1,"mode":"replay","publisher_connected":false}');
+  await session.decode('{"type":"lidar_status","schema_version":1,"mode":"live","publisher_connected":true,"session_id":"s2","recording":false}');
+  const replay = await session.decode('{"type":"lidar_status","schema_version":1,"mode":"replay","publisher_connected":false,"session_id":null,"recording":false}');
   assert.equal(lidarLabel(replay.lidar), 'Simulated LiDAR replay');
   assert.deepEqual(events, ['session_started', 'tracking_lost', 'tracking_restored', 'session_started', 'publisher_connected']);
 });
@@ -107,6 +108,61 @@ test('malformed LiDAR frames are rejected', async () => {
     { camera_to_world: [1, 2, 3] }, { source: 'sonar' }, { session_id: '' }]) {
     await assert.rejects(session.decode(message(bad)), `accepted ${JSON.stringify(bad)}`);
   }
+});
+
+test('a paused display still clears its map and pose when an origin changes', async () => {
+  const session = createLidarSession();
+  await session.decode(message());
+  const frozen = session.current();
+  session.setPaused(true);
+  const paused = await session.decode(message({ sequence: 1, camera_to_world: pose(2, 0, 0) }));
+  assert.equal(paused.frame, frozen.frame);
+  const reset = await session.decode(message({ session_id: 's2', tracking: 'limited', points: [], confidences: [] }));
+  assert.equal(reset.lidar.sessionId, 's2');
+  assert.equal(reset.lidar.scanner, null);
+  assert.equal(reset.points.length, 0);
+});
+
+test('the scanner pose is distinct from sonar and its path breaks across lost tracking', async () => {
+  const session = createLidarSession();
+  const first = await session.decode(message());
+  assert.equal(first.target, undefined);
+  assert.deepEqual(first.lidar.scanner, [0, 1.3, 0]);
+  const lost = await session.decode(message({ sequence: 1, tracking: 'limited', points: [], confidences: [] }));
+  assert.equal(lost.lidar.scanner, null);
+  const resumed = await session.decode(message({ sequence: 2, camera_to_world: pose(1, 0, 0) }));
+  assert.deepEqual(resumed.lidar.path, [[0, 1.3, 0], null, [1, 1.3, 0]]);
+});
+
+test('rejects duplicate frames and separates publishers even with the same origin label', async () => {
+  const session = createLidarSession();
+  await session.decode(message());
+  await assert.rejects(session.decode(message({ points: [[4, 0, 0]], confidences: [2] })), /sequence/i);
+  const next = await session.decode(message({ device_id: 'other', points: [[4, 0, 0]], confidences: [2] }));
+  assert.deepEqual([...next.points], [4, 0, 0]);
+});
+
+test('local bridge JSONL playback accumulates observations and resets on the next origin', async () => {
+  const scan = await readLidarReplay([
+    message(), message({ sequence: 1, points: [[4, 0, 0]], confidences: [2], timestamp: 2 }),
+    message({ session_id: 'second', timestamp: 0, points: [[9, 0, 0]], confidences: [1] }),
+  ].join('\n'));
+  assert.deepEqual(scan.history.map(frame => frame.points.length / 3), [2, 3, 1]);
+  assert.deepEqual([...scan.points], [9, 0, 0]);
+  const saved = structuredClone(scan);
+  assert.deepEqual(saved.history.map(frame => frame.colors.length / 3), [2, 3, 1]);
+  assert.deepEqual(saved.colors, saved.history.at(-1).colors);
+  assert.deepEqual(scan.history.map(frame => frame.t), [0, 1000, 1000 + 1000 / 3]);
+  assert.equal(lidarLabel(scan.lidar), 'Simulated LiDAR replay');
+});
+
+test('room classes agree between the live map and its stored display coordinates', async () => {
+  const points = Array.from({ length: 100 }, (_, i) => [(i % 5) * 0.2, -1.1 + Math.floor(i / 5) * 0.025, -2]);
+  const session = createLidarSession();
+  const frame = structuredClone(await session.decode(message({ points, confidences: points.map(() => 2) })));
+  const replay = classifyRoom(frame.points, { hits: frame.hits });
+  assert.deepEqual(session.analyse().counts, replay.counts);
+  assert.deepEqual(frame.colors, colorsFor(replay.labels, frame.points.length / 3));
 });
 
 test('audio cues are off by default, distinct, and rate limited', () => {
@@ -137,5 +193,5 @@ test('decodes the exact text the iPhone app writes', async () => {
   assert.equal(frame.points.length, 6);
   assert.equal(frame.lidar.simulated, false);
   assert.equal(lidarLabel(frame.lidar), 'Live LiDAR');
-  assert.equal(+frame.target.position[0].toFixed(3), 0.512);
+  assert.equal(+frame.lidar.scanner[0].toFixed(3), 0.512);
 });
