@@ -1,4 +1,4 @@
-# Backend synthetic-model sprint ? 2026-11-15
+# Backend synthetic-model sprint - 2026-11-15
 
 ## Decision: RETAIN BASELINE
 
@@ -61,17 +61,17 @@ Opt-in `AcquisitionDiversity`; default generation is unchanged and tested agains
 a no-op profile. The candidate keeps 50% of scenes nominal (actual 206/400) and
 changes acquisition on 194/400 scenes. Each preserves ground-truth labels:
 
-- Sensor height 0.95?1.65 m: translate the entire scene vertically; normals and
+- Sensor height 0.95 to 1.65 m: translate the entire scene vertically; normals and
   relative geometry remain unchanged. This challenges the fixed chest-height prior.
-- Per-object reflectivity gain 0.5?1.5, independent of labels, clipped to 0.05?1:
+- Per-object reflectivity gain 0.5 to 1.5, independent of labels, clipped to 0.05 to 1:
   reduces dependence on a fixed material-strength value for each class.
-- Pitch -10?20 degrees and effective max range 3.5?6 m: changes visible/occluded
+- Pitch -10 to 20 degrees and effective max range 3.5 to 6 m: changes visible/occluded
   portions through the existing acoustic simulator rather than inventing points.
-- Retain 65?100% of extracted points: approximates missed detections and density
+- Retain 65 to 100% of extracted points: approximates missed detections and density
   changes. Raw volume is retained; this classifier consumes points only.
 
-Challenge scenes use height 0.8?1.8 m, gain 0.4?1.7, pitch -15?25 degrees,
-range 3?5.5 m, and 45?75% point retention. One challenge frame is empty and is
+Challenge scenes use height 0.8 to 1.8 m, gain 0.4 to 1.7, pitch -15 to 25 degrees,
+range 3 to 5.5 m, and 45 to 75% point retention. One challenge frame is empty and is
 kept for end-to-end analysis. Empty/no-return frames never become zero distance
 or invented classified objects. Values are uncalibrated augmentation assumptions,
 not measurements of HC-SR04, smoke, fog or real people.
@@ -203,7 +203,7 @@ No-go for an unqualified simulated demo remains:
 - `src/mapper-adapter.js:135` independently hard-codes live acquisition/delivery.
 - `src/main.js:214` labels all mapper input LiDAR map; line 242 defaults the
   plan's simulated flag to false. Correct backend metadata alone is insufficient.
-- `src/main.js:347` preserves disconnected bridge LiDAR only, while lines 356?376
+- `src/main.js:347` preserves disconnected bridge LiDAR only, while lines 356 to 376
   clear mapper state and return to mock. Reproduction: stream mapper simulation,
   connect Sonar / Preview, stop mapper: Mock data + Connection failed replaces scan.
   It is visibly labeled, not an unlabelled fallback, but loses the last scan.
@@ -301,6 +301,8 @@ name before rerunning tests, since pytest recreates basetemp. The experiment's
 existing results are protected by exclusive creation and must be preserved.
 
 
+Concise owner handoff: [Akshath reproduction and acceptance checklist](../AKSHATH_HANDOFF_20261115.md).
+
 ## Exact versioned change list
 
 - `scripts/check-sonar-contract.py`
@@ -323,3 +325,5 @@ existing results are protected by exclusive creation and must be preserved.
 - `sonar-ml/perception/src/sonar_perception/dataset.py`
 - `sonar-ml/perception/src/sonar_perception/experiment.py`
 - `sonar-ml/perception/tests/test_acquisition_diversity.py`
+
+- `sonar-ml/docs/reports/AKSHATH_HANDOFF_20261115.md`

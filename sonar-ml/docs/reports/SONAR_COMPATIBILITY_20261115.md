@@ -1,4 +1,4 @@
-# Ryan / Charvik sonar contract ? 2026-11-15
+# Ryan / Charvik sonar contract - 2026-11-15
 
 Reviewed commits: PR #8 a63ebf3, PR #6 594c24f, codex/ultrasonic-scan fedd00c.
 No firmware changes, physical serial operations or real ultrasonic validation.
@@ -22,8 +22,8 @@ No firmware changes, physical serial operations or real ultrasonic validation.
   emits explicit invalid events. A timeout is explicit in PR #6; mapper collapses
   missing/out-of-range/stale to no_sonar. Invalid mapper lines may leave the last
   valid reading fresh until its .35 s age limit expires.
-- Configure PR #6 limits to 0.03?4 m to match mapper acceptance; its generic
-  default .001?50 m is not HC-SR04 calibration. Serial mode requires verified
+- Configure PR #6 limits to 0.03 to 4 m to match mapper acceptance; its generic
+  default .001 to 50 m is not HC-SR04 calibration. Serial mode requires verified
   model, modality, explicit baud, sensor ID and limit flags. Verification flag
   records operator authorization; it does not verify wiring or physics.
 - Firmware carries no provenance. Test fixtures must remain synthetic; physical
