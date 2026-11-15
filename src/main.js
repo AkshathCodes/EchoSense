@@ -5,6 +5,8 @@ import { openFeed } from './feed.js';
 import { decodeSocketFrame, sonarLabel } from './sonar.js';
 import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL } from './lidar.js';
 import { createCues } from './audio-cues.js';
+import { drawRoomPlan } from './room-plan.js';
+import { classNames } from './room-classifier.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
 import { sampleScans, MOCK_SPACE } from './samples.js';
 import { createLibrary } from './library.js';
@@ -194,10 +196,38 @@ function showScanSource() {
   set('study', !live ? 'Living room / sample scan' : scan ? 'LiDAR · Spatial memory'
     : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
   el('lidar-panel').hidden = !(live && scan);
+  // In LiDAR mode the "color" render mode shows the classifier's surface classes.
+  mode.querySelector('[value="color"]').textContent = live && scan ? 'Surface classes' : 'Natural color';
+  if (live && scan && !classModeChosen) {
+    classModeChosen = true;
+    mode.value = 'color';
+    setMode();
+  }
+  if (!(live && scan)) {
+    classModeChosen = false;
+    el('room-analysis').hidden = true;
+  }
 }
 
 const trackingText = { normal: 'Tracking', limited: 'Tracking limited', not_available: 'No tracking' };
-let coverageRevision = -1;
+let coverageRevision = -1, classModeChosen = false, planRevision = -1;
+function showRoomAnalysis(force = false) {
+  if (el('room-analysis').hidden || !force && planRevision === lidar.memory.revision) return;
+  planRevision = lidar.memory.revision;
+  const analysis = lidar.analyse();
+  drawRoomPlan(el('room-plan'), analysis, { path: lidar.memory.trajectory, simulated: Boolean(latest.lidar?.simulated) });
+  const total = analysis.labels.length || 1;
+  set('room-analysis-note', classNames.slice(1).map((name, i) =>
+    `${name} ${Math.round(analysis.counts[i + 1] / total * 100)}%`).join(' · ') + ` of ${numbers.format(analysis.labels.length)} points`);
+}
+el('lidar-analyse').addEventListener('click', () => {
+  el('room-analysis').hidden = !el('room-analysis').hidden;
+  showRoomAnalysis(true);
+});
+el('room-analysis-close').addEventListener('click', () => { el('room-analysis').hidden = true; });
+el('room-plan-download').addEventListener('click', event => {
+  event.currentTarget.href = el('room-plan').toDataURL('image/png');
+});
 function showLidarStatus(scan) {
   const { stats } = scan;
   note.textContent = scan.mode === 'live' && !scan.publisher ? 'Waiting for the phone to connect to the bridge.'
@@ -210,6 +240,7 @@ function showLidarStatus(scan) {
     coverageRevision = lidar.memory.revision;
     drawCoverage(el('coverage-map'), lidar.memory);
   }
+  showRoomAnalysis();
 }
 el('lidar-clear').addEventListener('click', () => {
   lidar.clear();

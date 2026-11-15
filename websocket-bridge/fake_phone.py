@@ -1,7 +1,7 @@
 """SYNTHETIC stand-in for the iPhone app. Not real LiDAR data.
 
 Publishes lidar_frame v1 messages with source "synthetic": a scanner walking
-through a 5 x 4 m box room. Use it to work on the bridge and viewer without
+through a 5 x 4 m box room with a table and a crate. Use it to work on the bridge and viewer without
 the phone:
     python -B -m sonar_bridge --lidar --origin http://127.0.0.1:4173
     python -B fake_phone.py
@@ -16,6 +16,21 @@ import uuid
 from websockets.asyncio.client import connect
 
 ROOM_X, ROOM_Z, FLOOR, CEILING = 2.5, 2.0, -1.3, 1.2
+# Synthetic furniture as boxes: (x0, x1, y0, y1, z0, z1). A table and a low crate.
+BOXES = ((1.0, 2.0, FLOOR, FLOOR + 0.75, -0.3, 0.3), (-1.8, -1.3, FLOOR, FLOOR + 0.5, 1.0, 1.5))
+
+
+def box_hit(origin, direction, box) -> float:
+    """Distance along the ray to the box, or infinity. Slab test."""
+    near, far = 0.0, math.inf
+    for o, d, lo, hi in zip(origin, direction, box[0::2], box[1::2]):
+        if abs(d) < 1e-9:
+            if not lo <= o <= hi:
+                return math.inf
+            continue
+        a, b = (lo - o) / d, (hi - o) / d
+        near, far = max(near, min(a, b)), min(far, max(a, b))
+    return near if near <= far and near > 0 else math.inf
 
 
 def frame(sequence: int, session: str, rng: random.Random) -> dict:
@@ -31,6 +46,7 @@ def frame(sequence: int, session: str, rng: random.Random) -> dict:
         reach = min((ROOM_X - cx) / dx if dx > 0 else (-ROOM_X - cx) / dx if dx < 0 else math.inf,
                     (ROOM_Z - cz) / dz if dz > 0 else (-ROOM_Z - cz) / dz if dz < 0 else math.inf,
                     CEILING / dy if dy > 0 else FLOOR / dy if dy < 0 else math.inf)
+        reach = min(reach, *(box_hit((cx, 0.0, cz), (dx, dy, dz), box) for box in BOXES))
         if reach > 5:
             continue
         points.append([round(cx + dx * reach, 3), round(dy * reach, 3), round(cz + dz * reach, 3)])

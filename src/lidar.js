@@ -8,6 +8,7 @@
  * height, which would otherwise sink the room below the grid.
  */
 import { createSpatialMemory, SURFACE } from './spatial-memory.js';
+import { classifyRoom, colorsFor } from './room-classifier.js';
 
 export const LIDAR_URL = 'ws://127.0.0.1:8765/lidar/view';
 const MAX_POINTS = 5000;
@@ -47,10 +48,19 @@ export function lidarLabel({ mode, simulated }) {
  * `onEvent(name)` fires for session_started, tracking_lost, tracking_restored,
  * publisher_connected and publisher_lost.
  */
-export function createLidarSession({ memory = createSpatialMemory(), onEvent = () => {} } = {}) {
+export function createLidarSession({ memory = createSpatialMemory(), onEvent = () => {},
+  now = () => performance.now(), classifyEvery = 1000 } = {}) {
   let sessionId = null, tracking = null, paused = false, simulated = false;
   let link = { mode: 'live', publisher: false, recording: false };
   let trail = [], trailRevision = -1, cloud = new Float32Array(), cloudRevision = -1, sequence, timestamp, camera;
+  let analysis = classifyRoom(new Float32Array()), analysedAt = -Infinity;
+
+  /** Runs the room classifier on everything retained so far, in ARKit coordinates. */
+  function analyse() {
+    analysis = classifyRoom(memory.cloud());
+    analysedAt = now();
+    return analysis;
+  }
 
   function snapshot(includePoints) {
     const lift = -memory.floor;
@@ -64,23 +74,31 @@ export function createLidarSession({ memory = createSpatialMemory(), onEvent = (
     if (camera) frame.target = { position: [camera[0], camera[1] + lift, camera[2]], confidence: 1 };
     if (includePoints && memory.revision !== cloudRevision) {
       cloudRevision = memory.revision;
+      // Classifying every frame is wasted work once the map is large.
+      if (memory.count < 5000 || now() - analysedAt >= classifyEvery) analyse();
       cloud = memory.cloud(lift);
+      // Points added since the last classification are drawn in the neutral colour.
+      cloud.classColors = colorsFor(analysis.labels.length > memory.count ? new Uint8Array() : analysis.labels, memory.count);
     }
     if (includePoints) frame.points = cloud;
     return frame;
   }
 
   return {
-    memory,
+    memory, analyse,
+    /** Latest room classification. See src/room-classifier.js. */
+    get analysis() { return analysis; },
     get paused() { return paused; },
     setPaused(value) { paused = Boolean(value); },
     clear() {
       memory.clear();
       camera = undefined;
+      analyse();
     },
     /** Forget everything, including which session was active. Call before a new connection. */
     reset() {
       memory.clear();
+      analyse();
       sessionId = tracking = null;
       camera = sequence = timestamp = undefined;
       link = { mode: 'live', publisher: false, recording: false };
@@ -109,6 +127,7 @@ export function createLidarSession({ memory = createSpatialMemory(), onEvent = (
         // A new ARKit origin: earlier geometry is in a different coordinate frame.
         sessionId = frame.sessionId;
         memory.clear();
+        analyse();
         tracking = null;
         onEvent('session_started');
       }

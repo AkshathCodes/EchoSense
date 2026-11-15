@@ -271,9 +271,12 @@ export function createViewer(canvas, room, onCamera = () => {}, onReset) {
         cloudCount = room.cloud.length / 9;
       } else {
         const vertices = new Float32Array(points.length * 3);
+        // Optional per-point RGB (flat, 0..1), shown in the "color" render mode.
+        const colors = points.classColors?.length === points.length ? points.classColors : null;
         for (let i = 0; i < points.length / 3; i++) {
           vertices.set(points.subarray(i * 3, i * 3 + 3), i * 9);
-          vertices.set([0.23, 0.65, 1, 0.49, 0.64, 0.72], i * 9 + 3);
+          vertices.set([0.23, 0.65, 1], i * 9 + 3);
+          vertices.set(colors ? colors.subarray(i * 3, i * 3 + 3) : [0.49, 0.64, 0.72], i * 9 + 6);
         }
         cloud = upload(vertices, gl.DYNAMIC_DRAW, live);
         cloudCount = points.length / 3;

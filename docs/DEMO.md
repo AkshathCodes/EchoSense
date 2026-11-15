@@ -25,6 +25,7 @@ environmental intelligence for simulated search-and-rescue planning.
 | 2 | Walk two or three meters, keep scanning | "ECHO records where the scanner has been." | Orange path grows; Scanner path meters rise |
 | 3 | Turn your back on the first wall | "The phone no longer sees that wall. ECHO still has it." | First wall stays |
 | 4 | Point at the coverage map; leave the doorway unscanned | "Dark cells have no measurement. We never call them clear." | Dark region behind the doorway |
+| 4b | Click **Room analysis** | "ECHO sorts what it saw into floor, walls and objects, and measures each object. It does not claim to know what they are." | Labelled floor plan; table shows as an object with its height |
 | 5 | Cover the camera for two seconds | "When tracking fails, ECHO says so and stores nothing." | Tracking cue; skipped-frame count rises; no smear |
 | 6 | Stop scan, Save snapshot, open Saved Maps | "The exploration can be reviewed later." | Saved map with replay |
 | 7 (stretch) | Restart the bridge with `--lidar-replay demo.jsonl`, Connect | "Same session, replayed from the recording." | Badge reads LiDAR replay |
@@ -51,7 +52,7 @@ synthetic run is not a substitute and must not be described as a scan.
 - "Seen through" means one ray crossed a cell at some height. It is not proof
   the cell is empty.
 - Observed geometry is not proof an area is safe or fully searched.
-- No person or object detection runs on LiDAR data.
+- The classifier is geometric rules, not a trained model. It separates floor, wall, ceiling and object and measures objects. It does not identify them or detect people.
 
 ## Not built
 

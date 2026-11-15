@@ -8,7 +8,7 @@ for the area you're changing before you change it.
 | [`ios-lidar/`](ios-lidar/) | iPhone ARKit LiDAR publisher (Swift, not yet compiled) | Rishi | [ios-lidar/README.md](ios-lidar/README.md) |
 | [`websocket-bridge/`](websocket-bridge/) | Python bridge: LiDAR publish/view, record, replay; sonar replay | Charvik | [LIDAR_PROTOCOL.md](websocket-bridge/LIDAR_PROTOCOL.md) |
 | repo root (`index.html`, `src/`, `serve.js`, `test/`) | Web viewer, LiDAR rendering (`src/lidar.js`), saved maps (Node 20+, no packages) | Akshath | [README.md](README.md) |
-| `src/spatial-memory.js`, `src/audio-cues.js`, [`docs/DEMO.md`](docs/DEMO.md) | Voxel memory, coverage map, audio cues, demo plan | Ryan | [README.md](README.md) "LiDAR spatial memory" |
+| `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js`, [`docs/DEMO.md`](docs/DEMO.md) | Voxel memory, coverage map, room classification and floor plan, audio cues, demo plan | Ryan | [README.md](README.md) "LiDAR spatial memory" |
 | [`acoustic/`](acoustic/) | Audible-chirp laptop scanner, Databricks scan aggregation | Ryan | [README.md](README.md) "Acoustic Scan and Databricks" |
 | [`sonar-ml/`](sonar-ml/) | Python sonar simulation, 3D mapping, segmentation, classification; research, decisions (ADRs), logs | Rishi | [sonar-ml/AGENTS.md](sonar-ml/AGENTS.md), then [sonar-ml/docs/status.md](sonar-ml/docs/status.md) |
 

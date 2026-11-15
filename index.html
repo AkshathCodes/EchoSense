@@ -99,6 +99,7 @@
           <div class="lidar-actions">
             <button id="lidar-clear" type="button">Clear map</button>
             <button id="lidar-pause" type="button" aria-pressed="false">Pause</button>
+            <button id="lidar-analyse" type="button">Room analysis</button>
             <label><input id="lidar-audio" type="checkbox"> Audio cues</label>
           </div>
         </section>
@@ -115,6 +116,14 @@
       </div>
     </aside>
 
+    <section id="room-analysis" class="room-analysis" aria-label="Room analysis" hidden>
+      <canvas id="room-plan" width="1000" height="660" aria-label="Classified floor plan of the scanned room"></canvas>
+      <div class="room-analysis-bar">
+        <span id="room-analysis-note"></span>
+        <a id="room-plan-download" class="accent-button" download="echo-room-analysis.png" href="#">Download PNG</a>
+        <button id="room-analysis-close" type="button">Close</button>
+      </div>
+    </section>
     <div id="target-marker" class="target-marker" hidden><i></i>Estimated zone</div>
     <div id="anchor-labels" aria-hidden="true"></div>
     <aside id="camera-hud" class="camera-hud" aria-label="Camera heading and scene overview" hidden>
