@@ -67,6 +67,12 @@ node serve.js          # from the repo root; open http://127.0.0.1:4173/
 Connect the viewer to `ws://127.0.0.1:8765/ws` (its default). You see the
 accumulated map plus the current frame.
 
+## Collecting labelled data
+
+See **[DATA_COLLECTION.md](DATA_COLLECTION.md)**: what to scan, the per-scan routine
+(**Clear map** → scan → **Label this scan** panel → boxes → **Save labels**), and
+export. Why it works this way: [ADR-0017](../sonar-ml/docs/decisions/0017-scan-labelling.md).
+
 ## Send scans to Databricks
 
 ```bash

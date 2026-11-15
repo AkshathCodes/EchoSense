@@ -143,3 +143,50 @@ def test_export_writes_parquet_and_manifest(tmp_path):
     assert len(mp["x"]) > 1000 and set(mp["segment"]) == {0}
     meta = json.loads(res.session_path.read_text())
     assert meta["labels"] == {"lights": "off"} and meta["stats"]["frames"] == 25
+
+
+def test_clear_map_starts_fresh_recording(tmp_path):
+    from lidar_mapper.server import LiveMapper
+    live = LiveMapper(Mapper(), record=str(tmp_path / "rec.esd"), verbose=False)
+    for f in stream(10):
+        live.ingest(protocol.encode(f))
+    assert len(live.mapper.map) > 0
+    live.clear()
+    assert len(live.mapper.map) == 0 and live.mapper.R is None
+    assert (tmp_path / "rec-scan2.esd").exists()
+    for f in stream(10):  # a new scan maps from scratch (seq restarts, no relocalization needed)
+        live.ingest(protocol.encode(f))
+    assert len(live.mapper.map) > 0 and not live.mapper.segments
+    live.close()
+
+
+def test_labels_saved_live_and_exported(tmp_path):
+    import json
+
+    import pyarrow.parquet as pq
+
+    from lidar_mapper.export import export_session
+    from lidar_mapper.server import LiveMapper
+
+    rec = tmp_path / "labelled.esd"
+    live = LiveMapper(Mapper(), record=str(rec), verbose=False)
+    from lidar_mapper.server import write_record
+    for f in stream(20):
+        msg = protocol.encode(f)
+        write_record(live.record_fh, msg)  # what phone_handler does
+        live.ingest(msg)
+    live.record_fh.flush()
+    saved = live.set_labels({"lights": "off", "scene": "person_lying"},
+                            [{"label": "person", "pose": "lying", "min": [1.2, -0.4, -1.3], "max": [2.0, 0.2, -1.05]},
+                             {"label": "bad", "min": [1, 1, 1], "max": [0, 0, 0]}])  # invalid box is dropped
+    assert any(s.endswith(".labels.json") for s in saved) and any(s.endswith(".live.npz") for s in saved)
+    live.close()
+    res = export_session(rec, tmp_path / "out", labels={"room": "sim"})
+    meta = json.loads(res.session_path.read_text())
+    assert meta["map_source"] == "live"
+    assert meta["labels"] == {"lights": "off", "scene": "person_lying", "room": "sim"}
+    assert len(meta["annotations"]) == 1 and meta["annotations"][0]["label"] == "person"
+    fr = pq.read_table(res.frames_path).to_pydict()
+    assert fr["pose_status"].count("tracking") >= 15
+    mp = pq.read_table(res.map_path).to_pydict()
+    assert len(mp["x"]) == len(np.load(rec.with_suffix(".live.npz"))["map_points"])

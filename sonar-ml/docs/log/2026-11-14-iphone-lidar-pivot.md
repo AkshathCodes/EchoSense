@@ -134,3 +134,21 @@ Recording `light-vs-dark.esd` (908 frames, 3 app sessions). Diagnosis by replay:
   floor tilt 0.5-4.2°. All sessions labelled `lights=unknown`. scan4 has 3 map
   segments despite 0 app restarts, so tracking was lost mid-scan twice and the
   segments didn't merge.
+
+## Connection trouble, viewer fixes, labelling (late session)
+- **Phone couldn't reach the Mac:** venue Wi-Fi (10.140/15) isolates clients. On the
+  iPhone hotspot the Mac showed **192.0.0.3/32**, a macOS CLAT address because the
+  hotspot was **IPv6-only** (T-Mobile). Fix: the mapper listens on all IPv4 + IPv6
+  addresses (`host=None`). The phone uses `ws://[<Mac IPv6>]:8770/depth`.
+- **Dense viewer showed only a corner:** the canvas had no CSS size, so at 2x DPI it rendered
+  at double size. Fixed with 100vw/100vh. Also: re-frames as the map grows until the user
+  moves the camera, floor-level grid, 3D/Top buttons.
+- **Clear map & start new scan** button: wipes the map and rotates the recording file
+  (`-scan2.esd`, …).
+- **Labelling (ADR-0017):** scene fields + 2-click top-view boxes in the viewer. Live map
+  and live poses are saved next to each recording (`.live.npz`, `.labels.json`) so export
+  keeps boxes aligned. Pipeline tables: `silver_lidar_annotations`,
+  `gold_lidar_labeled_points`, `gold_lidar_annotation_summary`. Tested end to end on a
+  simulated session (local Spark: 3,691 person + 4,420 furniture points inside boxes)
+  and in the browser (box drawn, height auto 0.35 m, saved). 14 tests pass.
+- Guide for the team: `lidar/DATA_COLLECTION.md`.
