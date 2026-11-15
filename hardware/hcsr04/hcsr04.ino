@@ -26,8 +26,7 @@
     defined(ARDUINO_Seeed_XIAO_nRF52840_Sense)
 // XIAO pads D6 (Trig) and D5 (Echo): the two pads nearest the sensor when it
 // sits below the XIAO on the perfboard, so no long wires are needed.
-// XIAO pins are 3.3 V, so ECHO needs a divider: 1k / 2k, or one 10k with two
-// 10k in series to GND.
+// XIAO pins are 3.3 V, so ECHO needs the divider in the wiring guide.
 const uint8_t TRIG_PIN = D6;
 const uint8_t ECHO_PIN = D5;
 #elif defined(ESP32)
