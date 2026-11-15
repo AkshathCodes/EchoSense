@@ -42,7 +42,53 @@ is what the LiDAR cannot do, and why the two are worth combining.
 - 4 wires, 40 to 50 cm, from the sensor on the phone to the board
 - For the ESP32: one 1 kΩ and one 2 kΩ resistor (or the substitutes below)
 
-## ESP32 build, step by step
+## Seeed Studio XIAO build, soldered, no breadboard
+
+This assumes a **Seeed Studio XIAO** (ESP32C3, ESP32S3, RP2040, SAMD21 or
+nRF52840). All of them use 3.3 V pins, so the Echo divider is still needed.
+A 5 V Seeeduino wires like the Arduino table further down instead.
+
+The XIAO pads used, as printed on the board or its pinout card:
+
+| HC-SR04 | XIAO pad | Notes |
+|---|---|---|
+| VCC | **5V** (also labelled VBUS or VUSB) | 5 V from the USB cable. Not the 3V3 pad |
+| GND | **GND** | |
+| Trig | **D1** | Direct wire |
+| Echo | **D2**, through the divider | Never direct |
+
+What to solder:
+
+1. **Four wires onto the HC-SR04 pins**, 40 to 50 cm, four colors. Cover each
+   joint with heat-shrink or tape.
+2. **VCC wire to the XIAO 5V pad. Trig wire to D1.**
+3. **The divider, in line on the Echo wire.** Solder the Echo wire to one leg
+   of the 1 kΩ resistor. Twist the other leg of the 1 kΩ together with one
+   leg of the 2 kΩ and a short wire, and solder that three-way joint. The
+   short wire goes to **D2**. The free leg of the 2 kΩ goes to **GND**.
+4. **GND.** The sensor's GND wire and the 2 kΩ leg both go to the XIAO GND
+   pad. Twist them together first and solder one joint.
+5. Slide heat-shrink over the resistors, or wrap them in tape, so bare legs
+   cannot touch each other or the XIAO.
+
+Tips for a board this small: tin the pad and the wire separately, then touch
+them together with the iron for a second. Use thin wire. Do not bridge 5V to
+GND, which sit near each other on the XIAO: that shorts the USB port. If you
+have header pins and female jumpers, solder headers to the XIAO instead and
+push the wires on; it is easier to fix.
+
+No 1 kΩ and 2 kΩ? See the substitutes in the ESP32 section below.
+
+Flash it: in the Arduino IDE add Seeed's board package for your XIAO model,
+select the board and port, open `hcsr04.ino`, Upload. If the port does not
+appear, hold the tiny **B** (boot) button while plugging in USB. Open the
+Serial Monitor at 115200. The first line names the pins the sketch chose,
+for example `# hcsr04 trig pin 3 echo pin 4` (the numbers are the chip's own
+pin numbers for D1 and D2). If every reading is `timeout`, uncomment
+`#define SEEED_XIAO` at the top of the sketch and upload again. On a Mac the
+XIAO shows up as `/dev/cu.usbmodemXXXX`.
+
+## ESP32 dev board build, step by step
 
 The sketch uses **GPIO 26 for Trig and GPIO 27 for Echo** on an ESP32. Those
 are free on the classic 30- and 38-pin DevKit boards. On an S3, C3 or other

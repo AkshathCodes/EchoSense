@@ -8,8 +8,20 @@
 // Wiring and how the sensor works: README.md in this folder.
 // Not yet run on hardware.
 
-// The same sketch runs on an ESP32 and on a 5 V Arduino. Pins differ per board.
-#if defined(ESP32)
+// The same sketch runs on a Seeed Studio XIAO, an ESP32 dev board and a 5 V
+// Arduino. Pins differ per board.
+
+// Seeed Studio XIAO, any model: if the sketch does not pick these pins by
+// itself (readings are all "timeout"), uncomment the next line.
+// #define SEEED_XIAO
+
+#if defined(SEEED_XIAO) || defined(ARDUINO_XIAO_ESP32C3) || defined(ARDUINO_XIAO_ESP32S3) || \
+    defined(ARDUINO_XIAO_ESP32C6) || defined(ARDUINO_SEEED_XIAO_RP2040) || \
+    defined(ARDUINO_SEEED_XIAO_M0) || defined(ARDUINO_Seeed_XIAO_nRF52840)
+// XIAO pads D1 and D2. XIAO pins are 3.3 V, so ECHO needs the 1k / 2k divider.
+const uint8_t TRIG_PIN = D1;
+const uint8_t ECHO_PIN = D2;
+#elif defined(ESP32)
 // Classic ESP32 DevKit. ECHO must come through the 1k / 2k divider: the sensor
 // drives it at 5 V and ESP32 pins take 3.3 V at most.
 const uint8_t TRIG_PIN = 26;
@@ -28,10 +40,16 @@ const unsigned long ECHO_TIMEOUT_US = 25000;
 const float METERS_PER_MICROSECOND = 343.0f / 2.0f / 1000000.0f;
 
 void setup() {
+  // Shows which pins this build chose. The mapper ignores lines that are not numbers.
+  Serial.begin(115200);
+  delay(1500);
+  Serial.print(F("# hcsr04 trig pin "));
+  Serial.print(TRIG_PIN);
+  Serial.print(F(" echo pin "));
+  Serial.println(ECHO_PIN);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   digitalWrite(TRIG_PIN, LOW);
-  Serial.begin(115200);
 }
 
 void loop() {
