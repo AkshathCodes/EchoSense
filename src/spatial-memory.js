@@ -5,7 +5,8 @@
  * rotates or rescales them.
  *
  * Three records are kept, all bounded:
- *  - surface voxels: one retained point per occupied 5 cm cube
+ *  - surface voxels: one retained point per occupied 5 cm cube, with a count of
+ *    how many separate frames hit it (a stray return is rarely hit twice)
  *  - trajectory: where the scanner has been
  *  - plan-view coverage: 25 cm floor-plan cells, each UNKNOWN, SEEN or SURFACE
  *
@@ -25,11 +26,13 @@ const inRange = n => n > -2048 && n < 2048;
 
 export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0.25,
   minConfidence = 1, maxTrajectory = 4000, raySubsample = 4, floorBand = 0.15 } = {}) {
-  let voxels, positions, count, trajectory, pathLength, coverage, floor, integrated, skipped, dropped, revision;
+  let voxels, positions, hitCounts, lastFrame, count, trajectory, pathLength, coverage, floor, integrated, skipped, dropped, revision;
 
   function clear() {
     voxels = new Map();
     positions = new Float32Array(3 * 4096);
+    hitCounts = new Uint8Array(4096);
+    lastFrame = new Uint32Array(4096);
     count = 0;
     trajectory = [];
     pathLength = 0;
@@ -63,7 +66,7 @@ export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0
       if (trajectory.length > maxTrajectory) trajectory = trajectory.filter((_, i) => i % 2 === 0 || i > maxTrajectory / 2);
     }
     mark(camera[0], camera[2], SEEN);
-    let added = 0;
+    let added = 0, confirmed = 0;
     for (let i = 0; i < points.length; i++) {
       if ((confidences?.[i] ?? 2) < minConfidence) continue;
       const [x, y, z] = points[i];
@@ -71,7 +74,14 @@ export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0
       const ix = Math.floor(x / voxel), iy = Math.floor(y / voxel), iz = Math.floor(z / voxel);
       if (!inRange(ix) || !inRange(iy) || !inRange(iz)) continue;
       const key = pack(ix, iy, iz);
-      if (!voxels.has(key)) {
+      const existing = voxels.get(key);
+      if (existing !== undefined) {
+        // Count one hit per frame, so a dense frame cannot confirm its own strays.
+        if (lastFrame[existing] !== integrated && hitCounts[existing] < 255) {
+          lastFrame[existing] = integrated;
+          if (++hitCounts[existing] === 2) confirmed++;
+        }
+      } else {
         if (count >= maxVoxels) {
           dropped++;
         } else {
@@ -79,7 +89,14 @@ export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0
             const grown = new Float32Array(Math.min(maxVoxels * 3, positions.length * 2));
             grown.set(positions);
             positions = grown;
+            const hits = new Uint8Array(grown.length / 3), frames = new Uint32Array(grown.length / 3);
+            hits.set(hitCounts);
+            frames.set(lastFrame);
+            hitCounts = hits;
+            lastFrame = frames;
           }
+          hitCounts[count] = 1;
+          lastFrame[count] = integrated;
           positions.set([x, y, z], count * 3);
           voxels.set(key, count++);
           added++;
@@ -93,7 +110,7 @@ export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0
         mark(x, z, y > floor + floorBand ? SURFACE : SEEN);
       }
     }
-    if (added || moved > 0.05) revision++;
+    if (added || moved > 0.05 || confirmed) revision++;
     return { added, stored: true };
   }
 
@@ -110,6 +127,8 @@ export function createSpatialMemory({ voxel = 0.05, maxVoxels = 120000, cell = 0
       if (lift) for (let i = 1; i < out.length; i += 3) out[i] += lift;
       return out;
     },
+    /** Parallel to cloud(): how many separate frames hit each retained point (saturates at 255). */
+    hits() { return hitCounts.slice(0, count); },
     /** Visits each recorded plan-view cell: (cellX, cellZ, state). Unknown cells are not stored. */
     eachCell(visit) {
       for (const [key, state] of coverage) {

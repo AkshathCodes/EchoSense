@@ -35,6 +35,20 @@ EchoSenseLiDAR, delete its two template Swift files, drag in everything from
 `ios-lidar/EchoSenseLiDAR/`, and add the keys listed in `project.yml` to the
 target's Info tab.
 
+## Mac setup for the laptop side
+
+- **Python 3.11 or later.** The `python3` that ships with macOS is 3.9 and
+  the bridge will not install on it. Check with `python3 --version`. If it is
+  older, `brew install python@3.12` and create the venv with
+  `python3.12 -m venv .venv`.
+- **Node 20 or later** for `node serve.js`: `brew install node`.
+- The first time the bridge starts with `--lidar`, macOS asks whether Python
+  may accept incoming network connections. Click **Allow**, or the phone
+  cannot reach it.
+- If Xcode refuses to open the project as "created by a newer or unsupported
+  version", the Xcode is older than 16. Update Xcode or use the `xcodegen`
+  fallback above.
+
 ## Operate
 
 ```sh
@@ -42,7 +56,7 @@ target's Info tab.
 node serve.js
 # terminal 2
 cd websocket-bridge
-python -m venv .venv && .venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -e .   # needs Python 3.11 or later
 .venv/bin/python -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
 ```
 

@@ -105,14 +105,14 @@ cutaway. The wireframe and points are generated from surfaces at startup.
 ```sh
 node serve.js
 cd websocket-bridge
-python -m venv .venv && .venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -e .   # needs Python 3.11 or later
 .venv/bin/python -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
 ```
 
 Open `http://127.0.0.1:4173/` and click **Connect** (the address defaults to
 `ws://127.0.0.1:8765/lidar/view`). Then publish frames from the phone
 ([ios-lidar/README.md](ios-lidar/README.md)) or, with no phone, from the
-labeled synthetic publisher: `python -B fake_phone.py` in `websocket-bridge/`.
+labeled synthetic publisher: `.venv/bin/python -B fake_phone.py` in `websocket-bridge/`.
 
 What the viewer adds on top of the point cloud:
 
@@ -152,9 +152,15 @@ Replay a recorded session:
 .venv/bin/python -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
 ```
 
-The classifier scores 92 to 100% per-class recall on a clean synthetic room
-with known labels (`test/room-classifier.test.js`). It has not been scored on
-real scans; expect it to do worse on partial, noisy ones.
+How well it does, on simulation only (`test/scan-simulator.js` ray-casts a
+furnished room at the phone's sampling density with range noise and stray
+returns): 91 to 96% of points labeled correctly across a typical 40 s scan, a
+12 s scan, a scan that never looks up, and a noisy one. The sofa, table and
+crate are found with heights within about 5 cm; footprints come out up to
+30 cm too large. Known weak spots: a wall that has only been partly scanned
+is listed as an object until more of it is seen, the bottom 10 cm of walls
+and furniture is labeled floor, and anything taller than 1.2 m (a person, a
+door, a cabinet) is labeled wall. It has not been scored on a real scan.
 
 Not verified: the iPhone app has never been compiled, and no real LiDAR frame
 has passed through this pipeline. Everything above was exercised with

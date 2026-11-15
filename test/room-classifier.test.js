@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyRoom, colorsFor, classColors, FLOOR, WALL, CEILING, OBJECT } from '../src/room-classifier.js';
+import { score } from './scan-simulator.js';
 
 // SYNTHETIC room with known labels: 5 x 4 m, floor at y = -1.3, ceiling at y = 1.2,
 // a 1.0 x 0.6 x 0.75 m table and a 0.5 m cube. Points carry up to 1.5 cm of noise.
@@ -81,3 +82,32 @@ test('colours follow labels and unlabelled tail points are neutral', () => {
   assert.deepEqual([...colors.slice(0, 3)].map(n => +n.toFixed(2)), classColors[WALL]);
   assert.deepEqual([...colors.slice(6, 9)].map(n => +n.toFixed(2)), classColors[0]);
 });
+
+// Simulated scans with known answers. The real furniture is a sofa (2.0 x 0.9 x 0.8 m),
+// a table (1.0 x 0.6 x 0.75 m) and a crate (0.5 x 0.5 x 0.5 m).
+const scans = {
+  'typical 40 s scan with 2% stray returns': {},
+  'short 12 s scan': { seconds: 12 },
+  'scan that never looks up': { lookUp: false },
+  'noisy scan, 3 cm error and 5% stray returns': { noise: 0.03, outliers: 0.05 },
+};
+for (const [name, options] of Object.entries(scans)) {
+  test(`simulated ${name}`, () => {
+    const result = score(options);
+    console.log(name, JSON.stringify({ accuracy: result.accuracy, recall: result.recall, objects: result.objects }));
+    assert.ok(result.accuracy >= 0.88, `accuracy ${result.accuracy}`);
+    assert.ok(Math.abs(result.floorY + 1.3) < 0.06, `floor at ${result.floorY}`);
+    if (options.lookUp === false) assert.equal(result.height, null);
+    else assert.ok(Math.abs(result.height - 2.5) < 0.1, `room height ${result.height}`);
+    // The three real pieces of furniture are found near their true positions and heights.
+    // Footprints come out up to about 30 cm too large, which shifts centres by up to 0.4 m.
+    // A 12 s scan has not reached the crate yet, so it is not expected there.
+    const expected = [[0, -1.55, 0.8], [1.5, 0, 0.75], ...(options.seconds === 12 ? [] : [[-1.55, 1.25, 0.5]])];
+    for (const [x, z, h] of expected) {
+      assert.ok(result.objects.some(o => Math.abs(o.x - x) < 0.4 && Math.abs(o.z - z) < 0.4 && Math.abs(o.height - h) < 0.15),
+        `no object near ${x}, ${z} with height ${h}: ${JSON.stringify(result.objects)}`);
+    }
+    // Partly scanned walls can still show up as extra objects. Keep that bounded.
+    assert.ok(result.objects.length <= 6, `${result.objects.length} objects listed`);
+  });
+}

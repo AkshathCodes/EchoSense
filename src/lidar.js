@@ -57,13 +57,14 @@ export function createLidarSession({ memory = createSpatialMemory(), onEvent = (
 
   /** Runs the room classifier on everything retained so far, in ARKit coordinates. */
   function analyse() {
-    analysis = classifyRoom(memory.cloud());
+    analysis = classifyRoom(memory.cloud(), { hits: memory.hits() });
     analysedAt = now();
     return analysis;
   }
 
   function snapshot(includePoints) {
-    const lift = -memory.floor;
+    // The classifier's floor ignores stray returns; the raw minimum is the fallback.
+    const lift = -(analysis.floorY ?? memory.floor);
     if (memory.revision !== trailRevision) {
       trailRevision = memory.revision;
       // The viewer joins trail samples less than 1.5 s apart. Spacing here is nominal.

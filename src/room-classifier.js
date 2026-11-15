@@ -8,19 +8,28 @@
  * Input is flat XYZ in ARKit world meters (+Y up, gravity aligned).
  *
  * Rules, in order:
- *  1. Floor height = the most populated 5 cm height layer in the bottom 40 cm.
- *  2. Ceiling height = the most populated layer in the top 40 cm, accepted only
- *     if it is at least `minCeiling` above the floor and holds enough points to
- *     be a surface. Otherwise the room has no ceiling label.
- *  3. A 10 cm plan-view column is WALL when its points span at least
- *     `wallHeight` above the floor and fill at least half of that span.
- *     Tall cabinets and doors pass this test too: WALL means "tall vertical
- *     structure", which is what it looks like to a depth sensor.
+ *  0. Stray points are set aside first. A point stays UNCLASSIFIED unless its
+ *     own and neighbouring 10 cm cells hold enough evidence: `minSupport`
+ *     points, or, when per-point hit counts are supplied, `minSupportHits`
+ *     frame hits in total. A real surface is seen again and again; a stray
+ *     return is not.
+ *     Depth sensors produce isolated "flying pixels" at edges and on shiny
+ *     surfaces, and a single one below the floor would otherwise move it.
+ *  1. Floor height = the lowest 5 cm height layer that holds a real share of
+ *     the points, refined to the local peak.
+ *  2. Ceiling height = the highest such layer, accepted only if it is at least
+ *     `minCeiling` above the floor and stands out against the layers below it
+ *     (a ceiling is a horizontal sheet; the top of a wall is not).
+ *  3. A 10 cm plan-view column is WALL when its points reach `wallHeight`
+ *     above the floor and fill at least `wallFill` of that span. Tall cabinets
+ *     and doors pass this test too: WALL means "tall vertical structure".
  *  4. Points within `floorBand` of the floor are FLOOR and within
- *     `ceilingBand` of the ceiling are CEILING. Of the rest, points in a WALL
- *     column are WALL and everything else is OBJECT.
- *  5. OBJECT columns that touch (8-neighbour) form one object. Groups smaller
- *     than `minObjectCells` are left as loose OBJECT points and not listed.
+ *     `ceilingBand` of the ceiling are CEILING. Points beyond either are
+ *     UNCLASSIFIED. Of the rest, points in a WALL column are WALL and
+ *     everything else is OBJECT.
+ *  5. OBJECT columns that touch (8-neighbour) form one object. Groups that are
+ *     small or thinly populated are left as loose OBJECT points and not
+ *     listed. An object's height is the 95th percentile of its points.
  *
  * It does not recognise what an object is. It reports size and height only.
  */
@@ -33,38 +42,84 @@ const LAYER = 0.05;
 const key = (a, b) => (a + 32768) * 65536 + (b + 32768);
 const unkey = k => [Math.floor(k / 65536) - 32768, k % 65536 - 32768];
 
-function busiestLayer(histogram, from, to) {
-  let best = -1, bestCount = 0;
-  for (let i = from; i <= to; i++) if ((histogram[i] ?? 0) > bestCount) { bestCount = histogram[i]; best = i; }
-  return [best, bestCount];
+function peakNear(histogram, from, to) {
+  let best = from;
+  for (let i = Math.max(0, from); i <= Math.min(histogram.length - 1, to); i++) if (histogram[i] > histogram[best]) best = i;
+  return best;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[sorted.length >> 1];
+}
+
+/** True for points with enough retained neighbours to be a surface and not a stray return. */
+function supported(points, n, hits, threshold) {
+  const size = 0.1, cells = new Map(), index = new Float64Array(n), ok = new Uint8Array(n);
+  const pack = (a, b, c) => ((a + 4096) * 8192 + (b + 4096)) * 8192 + (c + 4096);
+  for (let i = 0; i < n; i++) {
+    const k = pack(Math.floor(points[i * 3] / size), Math.floor(points[i * 3 + 1] / size), Math.floor(points[i * 3 + 2] / size));
+    index[i] = k;
+    cells.set(k, (cells.get(k) ?? 0) + (hits ? hits[i] : 1));
+  }
+  const verdict = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = index[i];
+    let good = verdict.get(k);
+    if (good === undefined) {
+      let total = 0;
+      for (let dx = -1; dx <= 1 && total < threshold; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        total += cells.get(k + (dx * 8192 + dy) * 8192 + dz) ?? 0;
+      }
+      verdict.set(k, good = total >= threshold);
+    }
+    ok[i] = good ? 1 : 0;
+  }
+  return ok;
 }
 
 export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBand = 0.12, wallHeight = 1.2,
-  wallFill = 0.5, minCeiling = 1.9, minObjectCells = 6, objectClearance = 0.12 } = {}) {
+  wallFill = 0.4, minCeiling = 1.9, minObjectCells = 6, minObjectPoints = 15, objectClearance = 0.12,
+  minObjectDensity = 2.5, minSupport = 6, minSupportHits = 14, hits = null } = {}) {
   const n = points.length / 3;
   const labels = new Uint8Array(n);
   const empty = { labels, floorY: null, ceilingY: null, wallCells: [], floorCells: [], objects: [],
     counts: [n, 0, 0, 0, 0], column, roomHeight: null, floorArea: 0 };
   if (n < 50) return empty;
 
-  let low = Infinity, high = -Infinity;
-  for (let i = 1; i < points.length; i += 3) { low = Math.min(low, points[i]); high = Math.max(high, points[i]); }
+  const counted = hits?.length === n ? hits : null;
+  const solid = supported(points, n, counted, counted ? minSupportHits : minSupport);
+  let low = Infinity, high = -Infinity, kept = 0;
+  for (let i = 0; i < n; i++) if (solid[i]) {
+    low = Math.min(low, points[i * 3 + 1]);
+    high = Math.max(high, points[i * 3 + 1]);
+    kept++;
+  }
+  if (kept < 50) return empty;
   const layers = Math.max(1, Math.ceil((high - low) / LAYER) + 1);
   const histogram = new Uint32Array(layers);
-  for (let i = 1; i < points.length; i += 3) histogram[Math.floor((points[i] - low) / LAYER)]++;
-  const [floorLayer] = busiestLayer(histogram, 0, Math.min(layers - 1, 8));
+  for (let i = 0; i < n; i++) if (solid[i]) histogram[Math.floor((points[i * 3 + 1] - low) / LAYER)]++;
+  // "A real share": well above what a few leftover strays could add up to.
+  const share = Math.max(20, kept * 0.004);
+  let floorLayer = 0;
+  while (floorLayer < layers - 1 && histogram[floorLayer] < share) floorLayer++;
+  floorLayer = peakNear(histogram, floorLayer, floorLayer + 3);
   const floorY = low + (floorLayer + 0.5) * LAYER;
-  const [ceilingLayer, ceilingCount] = busiestLayer(histogram, Math.max(0, layers - 9), layers - 1);
+  let ceilingLayer = layers - 1;
+  while (ceilingLayer > 0 && histogram[ceilingLayer] < share) ceilingLayer--;
+  ceilingLayer = peakNear(histogram, ceilingLayer - 3, ceilingLayer);
   const ceilingGuess = low + (ceilingLayer + 0.5) * LAYER;
-  // A ceiling is a surface: it should hold a real share of the points, not a few strays.
-  const ceilingY = ceilingGuess - floorY >= minCeiling && ceilingCount >= Math.max(30, n * 0.02) ? ceilingGuess : null;
+  // Compare with the layers 0.3 to 1.0 m below: wall-only layers all look alike.
+  const below = median(Array.from(histogram.subarray(Math.max(0, ceilingLayer - 20), Math.max(0, ceilingLayer - 6))));
+  const ceilingY = ceilingGuess - floorY >= minCeiling && histogram[ceilingLayer] >= 2 * below ? ceilingGuess : null;
 
   // Column statistics above the floor band and below the ceiling band.
   const top = ceilingY === null ? Infinity : ceilingY - ceilingBand;
   const columns = new Map();
   for (let i = 0; i < n; i++) {
     const y = points[i * 3 + 1];
-    if (y <= floorY + floorBand || y >= top) continue;
+    if (!solid[i] || y <= floorY + floorBand || y >= top) continue;
     const k = key(Math.floor(points[i * 3] / column), Math.floor(points[i * 3 + 2] / column));
     let c = columns.get(k);
     if (!c) columns.set(k, c = { min: Infinity, max: -Infinity, layers: new Set() });
@@ -77,17 +132,16 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     const span = c.max - Math.min(c.min, floorY + floorBand);
     if (c.max - floorY >= wallHeight && c.layers.size * LAYER >= span * wallFill) wall.add(k);
   }
-  // A thin wall can straddle two columns, leaving one of them sparse. Adopt
-  // tall-enough neighbours of wall columns so the wall is not half "object".
-  for (const [k, c] of columns) {
-    if (wall.has(k) || c.max - floorY < wallHeight * 0.6) continue;
-    const [cx, cz] = unkey(k);
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      if (wall.has(key(cx + dx, cz + dz)) && columns.get(key(cx + dx, cz + dz)).layers.size >= c.layers.size) {
-        wall.add(k);
-        break;
-      }
+  // Sensor noise spreads a wall over neighbouring columns that are tall but sparse.
+  // Adopt them (two passes, so up to 20 cm) or they show up as thin tall "objects".
+  for (let pass = 0; pass < 2; pass++) {
+    const adopted = [];
+    for (const [k, c] of columns) {
+      if (wall.has(k) || c.max - floorY < wallHeight * 0.6) continue;
+      const [cx, cz] = unkey(k);
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => wall.has(key(cx + dx, cz + dz)))) adopted.push(k);
     }
+    for (const k of adopted) wall.add(k);
   }
 
   const counts = [0, 0, 0, 0, 0];
@@ -98,7 +152,8 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     let label;
     // Bands first: the bottom and top few centimeters of a wall are labelled
     // floor and ceiling. Letting wall columns win instead costs about 10% of the floor.
-    if (ceilingY !== null && y >= top) label = CEILING;
+    if (!solid[i] || y < floorY - floorBand || ceilingY !== null && y > ceilingY + ceilingBand) label = UNCLASSIFIED;
+    else if (ceilingY !== null && y >= top) label = CEILING;
     else if (y <= floorY + floorBand) label = FLOOR;
     else if (wall.has(k)) label = WALL;
     else label = OBJECT;
@@ -107,9 +162,8 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     if (label === FLOOR) floorSet.add(k);
     else if (label === OBJECT && y >= floorY + objectClearance) {
       let o = objectColumns.get(k);
-      if (!o) objectColumns.set(k, o = { top: -Infinity, points: 0 });
-      o.top = Math.max(o.top, y);
-      o.points++;
+      if (!o) objectColumns.set(k, o = { heights: [] });
+      o.heights.push(y - floorY);
     }
   }
 
@@ -119,20 +173,25 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     if (seen.has(start)) continue;
     const stack = [start], cells = [];
     seen.add(start);
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, height = 0, pointCount = 0;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    const heights = [];
     while (stack.length) {
       const k = stack.pop(), [cx, cz] = unkey(k), o = objectColumns.get(k);
       cells.push([cx, cz]);
       x0 = Math.min(x0, cx); x1 = Math.max(x1, cx); z0 = Math.min(z0, cz); z1 = Math.max(z1, cz);
-      height = Math.max(height, o.top - floorY);
-      pointCount += o.points;
+      heights.push(...o.heights);
       for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
         const next = key(cx + dx, cz + dz);
         if (objectColumns.has(next) && !seen.has(next)) { seen.add(next); stack.push(next); }
       }
     }
-    if (cells.length < minObjectCells) continue;
-    objects.push({ cells, height, points: pointCount, width: (x1 - x0 + 1) * column, depth: (z1 - z0 + 1) * column,
+    // Sparse groups are leftover strays, not furniture.
+    if (cells.length < minObjectCells || heights.length < minObjectPoints ||
+        heights.length < cells.length * minObjectDensity) continue;
+    // 95th percentile, so one high stray point does not set the object's height.
+    heights.sort((a, b) => a - b);
+    const height = heights[Math.floor((heights.length - 1) * 0.95)];
+    objects.push({ cells, height, points: heights.length, width: (x1 - x0 + 1) * column, depth: (z1 - z0 + 1) * column,
       center: [(x0 + x1 + 1) / 2 * column, (z0 + z1 + 1) / 2 * column], footprint: cells.length * column * column });
   }
   objects.sort((a, b) => b.footprint - a.footprint);

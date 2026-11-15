@@ -216,7 +216,7 @@ class LidarHub:
                 if not ready.done():
                     ready.cancel()
                     return
-        except TimeoutError:
+        except asyncio.TimeoutError:
             await connection.close(1013, "slow consumer")
         except ConnectionClosed:
             pass
@@ -264,10 +264,10 @@ class LidarReplay:
                 try:
                     await asyncio.wait_for(connection.wait_closed(), self.interval)
                     return
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     pass
             await connection.close(1000, "source complete")
-        except (ConnectionClosed, TimeoutError):
+        except (ConnectionClosed, asyncio.TimeoutError):
             pass
 
 

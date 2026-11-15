@@ -17,7 +17,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
     private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
     private let lock = NSLock()
     private var task: URLSessionWebSocketTask?
-    private var open = false
+    private var isOpen = false
     private var busy = false
     private var wanted: URL?
 
@@ -46,7 +46,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
         wanted = nil
         let current = task
         task = nil
-        open = false
+        isOpen = false
         busy = false
         lock.unlock()
         current?.cancel(with: .goingAway, reason: nil)
@@ -57,12 +57,12 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
     var readyForFrame: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return open && !busy
+        return isOpen && !busy
     }
 
     func send(_ text: String) {
         lock.lock()
-        guard open, !busy, let current = task else {
+        guard isOpen, !busy, let current = task else {
             lock.unlock()
             return
         }
@@ -88,7 +88,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
         let previous = task
         let next = session.webSocketTask(with: url)
         task = next
-        open = false
+        isOpen = false
         busy = false
         lock.unlock()
         previous?.cancel(with: .goingAway, reason: nil)
@@ -117,7 +117,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
             return
         }
         task = nil
-        open = false
+        isOpen = false
         busy = false
         let retry = wanted != nil
         lock.unlock()
@@ -142,7 +142,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
                     didOpenWithProtocol `protocol`: String?) {
         lock.lock()
         let current = task === webSocketTask
-        if current { open = true }
+        if current { isOpen = true }
         lock.unlock()
         if current { publish(.connected) }
     }
