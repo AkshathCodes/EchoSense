@@ -143,3 +143,85 @@ def test_export_writes_parquet_and_manifest(tmp_path):
     assert len(mp["x"]) > 1000 and set(mp["segment"]) == {0}
     meta = json.loads(res.session_path.read_text())
     assert meta["labels"] == {"lights": "off"} and meta["stats"]["frames"] == 25
+
+
+def test_clear_map_starts_fresh_recording(tmp_path):
+    from lidar_mapper.server import LiveMapper
+    live = LiveMapper(Mapper(), record=str(tmp_path / "rec.esd"), verbose=False)
+    for f in stream(10):
+        live.ingest(protocol.encode(f))
+    assert len(live.mapper.map) > 0
+    live.clear()
+    assert len(live.mapper.map) == 0 and live.mapper.R is None
+    assert (tmp_path / "rec-scan2.esd").exists()
+    for f in stream(10):  # a new scan maps from scratch (seq restarts, no relocalization needed)
+        live.ingest(protocol.encode(f))
+    assert len(live.mapper.map) > 0 and not live.mapper.segments
+    live.close()
+
+
+def test_labels_saved_live_and_exported(tmp_path):
+    import json
+
+    import pyarrow.parquet as pq
+
+    from lidar_mapper.export import export_session
+    from lidar_mapper.server import LiveMapper
+
+    rec = tmp_path / "labelled.esd"
+    live = LiveMapper(Mapper(), record=str(rec), verbose=False)
+    from lidar_mapper.server import write_record
+    for f in stream(20):
+        msg = protocol.encode(f)
+        write_record(live.record_fh, msg)  # what phone_handler does
+        live.ingest(msg)
+    live.record_fh.flush()
+    saved = live.set_labels({"lights": "off", "scene": "person_lying"},
+                            [{"label": "person", "pose": "lying", "min": [1.2, -0.4, -1.3], "max": [2.0, 0.2, -1.05]},
+                             {"label": "bad", "min": [1, 1, 1], "max": [0, 0, 0]}])  # invalid box is dropped
+    assert any(s.endswith(".labels.json") for s in saved) and any(s.endswith(".live.npz") for s in saved)
+    live.close()
+    res = export_session(rec, tmp_path / "out", labels={"room": "sim"})
+    meta = json.loads(res.session_path.read_text())
+    assert meta["map_source"] == "live"
+    assert meta["labels"] == {"lights": "off", "scene": "person_lying", "room": "sim"}
+    assert len(meta["annotations"]) == 1 and meta["annotations"][0]["label"] == "person"
+    fr = pq.read_table(res.frames_path).to_pydict()
+    assert fr["pose_status"].count("tracking") >= 15
+    mp = pq.read_table(res.map_path).to_pydict()
+    assert len(mp["x"]) == len(np.load(rec.with_suffix(".live.npz"))["map_points"])
+
+
+def test_synthetic_scan_from_an_empty_room(tmp_path):
+    import json
+
+    from lidar_mapper.export import export_session
+    from lidar_mapper.server import LiveMapper, write_record
+    from lidar_mapper.synth import ray_prim, Capsule, synthesize
+
+    # ray-capsule sanity: straight down onto a horizontal capsule of radius 0.1 at z = 0
+    d = ray_prim(np.array([0.0, 0, 1]), np.array([[0.0, 0, -1]]), Capsule(np.array([-1.0, 0, 0]), np.array([1.0, 0, 0]), 0.1))
+    assert abs(d[0] - 0.9) < 1e-9
+
+    rec = tmp_path / "empty.esd"  # a simulated *empty* room (no lump on the floor) stands in for a real one
+    live = LiveMapper(Mapper(), record=str(rec), verbose=False)
+    for f in stream(40, boxes=default_room()[:-1]):
+        msg = protocol.encode(f)
+        write_record(live.record_fh, msg)
+        live.ingest(msg)
+    live.set_labels({"lights": "off", "room": "sim", "scene": "empty_room"}, [])
+    live.close()
+
+    r = synthesize(rec, "pet", "cat", tmp_path / "synth", "synth-pet-01", seed=0)
+    lab = json.loads((tmp_path / "synth" / "synth-pet-01.labels.json").read_text())
+    assert lab["scene"]["data_origin"] == "synthetic" and lab["scene"]["base_scan"] == "empty.esd"
+    assert lab["scene"]["lights"] == "off" and lab["scene"]["scene"] == "pet"
+    (box,) = lab["boxes"]
+    assert box["label"] == "pet" and r["visible_target_points"][0] > 100
+    lo, hi = np.array(box["min"]), np.array(box["max"])
+    assert 0.15 < hi[2] - lo[2] < 0.7  # a cat, not the room
+    mp = np.load(tmp_path / "synth" / "synth-pet-01.live.npz")["map_points"]
+    assert ((mp >= lo).all(1) & (mp <= hi).all(1)).sum() > 50  # the cat is in the map, inside its box
+    res = export_session(tmp_path / "synth" / "synth-pet-01.esd", tmp_path / "out")
+    meta = json.loads(res.session_path.read_text())
+    assert meta["map_source"] == "live" and meta["labels"]["data_origin"] == "synthetic"

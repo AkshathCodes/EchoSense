@@ -76,17 +76,35 @@ class ExportResult:
     stats: dict
 
 
+def load_sidecars(esd: Path):
+    """(live, labels) saved by the live server next to a recording, or None if absent."""
+    live_p, lab_p = esd.with_suffix(".live.npz"), esd.with_suffix(".labels.json")
+    live = dict(np.load(live_p, allow_pickle=False)) if live_p.exists() else None
+    lab = json.loads(lab_p.read_text()) if lab_p.exists() else None
+    return live, lab
+
+
 def export_session(esd: str | Path, out_dir: str | Path, labels: dict | None = None, notes: str = "",
-                   mapper: Mapper | None = None, session_id: str | None = None) -> ExportResult:
+                   mapper: Mapper | None = None, session_id: str | None = None,
+                   use_live: bool = True) -> ExportResult:
+    """With `use_live` and a `<scan>.live.npz` sidecar, poses and the map come from the live session
+    (the frame the labels were drawn in); otherwise the recording is replayed through the mapper."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
     esd, out = Path(esd), Path(out_dir)
     sid = session_id or session_id_for(esd)
+    live, lab = load_sidecars(esd)
+    if not use_live:
+        live = None
+    live_idx = {}
+    if live is not None:
+        live_idx = {float(t): i for i, t in enumerate(live["t"])}
     m = mapper or Mapper()
     rows: dict[str, list] = {k: [] for k in frames_schema().names}
     statuses: Counter = Counter()
     app_session, last_seq, t0, t1 = 0, -1, None, None
+    last_live = 0  # index of the most recent frame the live mapper processed
     lux = {"lights_on_frames": 0}
     for i, msg in enumerate(read_records(esd)):
         f = protocol.decode(msg)
@@ -95,19 +113,33 @@ def export_session(esd: str | Path, out_dir: str | Path, labels: dict | None = N
         last_seq = f.seq
         t0 = f.t if t0 is None else t0
         t1 = f.t
-        r = m.process(f)
-        statuses[r.status] += 1
+        if live is None:
+            r = m.process(f)
+            st, R, pos, rmse, inl, seg = r.status, r.R, r.t, r.rmse, r.inlier_frac, len(m.segments) + m.merges
+            npts = r.n_points
+        else:  # pose from the live session; frames the live mapper skipped keep the previous pose
+            j = live_idx.get(float(f.t))
+            if j is not None:
+                last_live = j
+                st = str(live["status"][j])
+            else:
+                st = "not_processed"
+            k = last_live
+            R, pos = live["R"][k], live["pos"][k]
+            rmse, inl, seg = float(live["rmse"][k]), float(live["inliers"][k]), int(live["segment"][k])
+            npts = int(np.isfinite(f.depth).sum())
+        statuses[st] += 1
         h, w = f.depth.shape
         rec = {
             "session_id": sid, "app_session": app_session, "frame_index": i, "seq": f.seq, "t": f.t,
             "source": f.source, "width": w, "height": h, "fx": f.K[0, 0], "fy": f.K[1, 1], "cx": f.K[0, 2],
             "cy": f.K[1, 2], "depth_f16": np.nan_to_num(f.depth, nan=0.0).astype("<f2").tobytes(),
             "confidence_u8": f.confidence.tobytes() if f.confidence is not None else None,
-            "valid_fraction": f.valid_fraction, "n_points": r.n_points, "attitude": _lst(f.attitude),
+            "valid_fraction": f.valid_fraction, "n_points": npts, "attitude": _lst(f.attitude),
             "attitude_ref": f.attitude_ref, "gravity": _lst(f.gravity), "rotation_rate": _lst(f.rotation_rate),
             "user_accel": _lst(f.user_accel), "ambient_lux": _f(f.ambient_lux), "arkit_tracking": f.arkit_tracking,
-            "pose_status": r.status, "pose_R": _lst(r.R), "pose_t": _lst(r.t), "icp_rmse": _f(r.rmse),
-            "icp_inliers": _f(r.inlier_frac), "segment": len(m.segments) + m.merges,
+            "pose_status": st, "pose_R": _lst(R), "pose_t": _lst(pos), "icp_rmse": _f(rmse),
+            "icp_inliers": _f(inl), "segment": seg,
         }
         for k, v in rec.items():
             rows[k].append(v)
@@ -120,11 +152,13 @@ def export_session(esd: str | Path, out_dir: str | Path, labels: dict | None = N
     frames_path = out / "frames" / f"{sid}.parquet"
     pq.write_table(pa.Table.from_pydict(rows, schema=frames_schema()), frames_path, compression="zstd")
 
-    # map: the current map plus any unmerged segments (each in its own coordinate frame)
-    maps = [(len(m.segments), m.map)] + [(i, s.map) for i, s in enumerate(m.segments)]
+    # map: live snapshot (labels were drawn on it), else the replay's current map + unmerged segments
     mrows: dict[str, list] = {k: [] for k in maps_schema().names}
-    for seg_id, vm in maps:
-        p, c = vm.points(2)
+    if live is not None:
+        seg_maps = [(int(live["segment"][-1]), live["map_points"], live["map_hits"])]
+    else:
+        seg_maps = [(len(m.segments), *m.map.points(2))] + [(i, *s.map.points(2)) for i, s in enumerate(m.segments)]
+    for seg_id, p, c in seg_maps:
         mrows["session_id"] += [sid] * len(p)
         mrows["segment"] += [seg_id] * len(p)
         mrows["x"] += p[:, 0].tolist(); mrows["y"] += p[:, 1].tolist(); mrows["z"] += p[:, 2].tolist()
@@ -132,20 +166,25 @@ def export_session(esd: str | Path, out_dir: str | Path, labels: dict | None = N
     map_path = out / "maps" / f"{sid}.parquet"
     pq.write_table(pa.Table.from_pydict(mrows, schema=maps_schema()), map_path, compression="zstd")
 
-    pts, _ = m.map.points(2)
+    pts = seg_maps[0][1]
     stats = {
         "frames": len(rows["seq"]), "app_sessions": app_session + 1, "duration_s": round(t1 - t0, 2),
         "status_counts": dict(statuses), "tracking_fraction": round(statuses["tracking"] / len(rows["seq"]), 3),
         "mean_valid_fraction": round(float(np.mean(rows["valid_fraction"])), 3),
-        "map_voxels": len(m.map), "map_points": int(len(pts)), "unmerged_segments": len(m.segments),
-        "relocalizations": m.relocalizations, "merges": m.merges, "floor": floor_check(pts),
+        "map_voxels": int(len(pts)) if live is not None else len(m.map), "map_points": int(len(pts)),
+        "unmerged_segments": 0 if live is not None else len(m.segments),
+        "relocalizations": statuses.get("relocalized", 0), "merges": statuses.get("merged", 0),
+        "floor": floor_check(pts),
         "extent_m": [round(float(v), 2) for v in (np.ptp(pts, axis=0) if len(pts) else np.zeros(3))],
     }
     session = {
         "session_id": sid, "export_version": EXPORT_VERSION, "protocol_version": protocol.VERSION,
         "mapper_version": __version__, "source_file": esd.name, "exported_at": datetime.now(timezone.utc).isoformat(),
         "recorded_at": datetime.fromtimestamp(esd.stat().st_mtime, timezone.utc).isoformat(),
-        "labels": labels or {}, "notes": notes, "mapper_settings": {
+        "labels": {**((lab or {}).get("scene") or {}), **(labels or {})},
+        "notes": notes or ((lab or {}).get("scene") or {}).get("notes", ""),
+        "annotations": (lab or {}).get("boxes", []), "map_source": "live" if live is not None else "replay",
+        "mapper_settings": {
             "voxel": m.map.voxel, "icp_voxel": m.icp_voxel, "max_range": m.max_range, "map_max_range": m.map_max_range,
             "edge_filter": m.edge_filter, "min_inlier_frac": m.min_inlier_frac, "pose_source": m.pose_source},
         "stats": stats,

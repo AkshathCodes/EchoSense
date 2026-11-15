@@ -7,7 +7,7 @@
 <style>
   :root { --bg: #07090c; --panel: rgba(14, 18, 24, 0.86); --text: #d7dee8; --muted: #8592a3; --accent: #5cc8ff; --warn: #ffb454; --bad: #ff6b6b; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; overflow: hidden; }
-  #c { position: fixed; inset: 0; }
+  #c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }  /* else a 2x-DPI canvas overflows the window */
   .panel { position: fixed; top: 12px; left: 12px; background: var(--panel); border: 1px solid #1f2733; border-radius: 10px; padding: 10px 12px; min-width: 230px; backdrop-filter: blur(6px); }
   .panel h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; letter-spacing: .2px; }
   .row { display: flex; justify-content: space-between; gap: 16px; }
@@ -20,6 +20,14 @@
   input[type=range] { width: 110px; }
   button { background: #16202b; color: var(--text); border: 1px solid #2a3646; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
   .hint { position: fixed; bottom: 10px; left: 12px; color: var(--muted); font-size: 12px; }
+  #labels { left: auto; right: 12px; width: 270px; max-height: calc(100vh - 40px); overflow: auto; }
+  #labels select, #labels input[type=text] { width: 140px; background: #10161e; color: var(--text); border: 1px solid #2a3646; border-radius: 5px; padding: 2px 4px; }
+  #labels .sub { color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+  #boxList { margin: 4px 0; padding-left: 18px; }
+  #boxList li { margin: 2px 0; }
+  #boxList button { padding: 0 6px; margin-left: 6px; }
+  #drawHint { color: var(--warn); font-size: 12px; min-height: 16px; }
+  .primary { border-color: #2f6f8f !important; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -43,10 +51,34 @@
     <label>Hide ceiling above <input id="ceil" type="range" min="0" max="100" step="1" value="80"></label>
     <label>Live frame <input id="showFrame" type="checkbox" checked></label>
     <label>Follow phone <input id="follow" type="checkbox"></label>
-    <button id="reset">Reset view</button>
+    <div style="display:flex;gap:6px"><button id="reset">3D view</button><button id="top">Top view</button></div>
+    <button id="clear" style="border-color:#5a2a2a">Clear map &amp; start new scan</button>
   </div>
 </div>
-<div class="hint">Drag to orbit · right-drag to pan · scroll to zoom · colour = height</div>
+<div class="panel" id="labels">
+  <h1>Label this scan</h1>
+  <div class="row"><span>Scan file</span><span id="scanName">-</span></div>
+  <div class="controls">
+    <label>Lights <select id="lights"><option value="">choose</option><option>on</option><option>dim</option><option>off</option></select></label>
+    <label>Room <input id="room" type="text" placeholder="e.g. lab-2"></label>
+    <label>Scene <select id="sceneType">
+      <option value="">choose</option><option>empty_room</option><option>person_standing</option>
+      <option>person_sitting</option><option>person_lying</option><option>person_crouching</option>
+      <option>person_partly_covered</option><option>pet</option><option>multiple_people</option><option>mixed</option>
+    </select></label>
+    <label>Notes <input id="notes" type="text" placeholder="optional"></label>
+  </div>
+  <div class="sub">Objects in this scan (boxes in the map)</div>
+  <div class="controls">
+    <label>Label <select id="boxLabel"><option>person</option><option>pet</option><option>furniture</option><option>clutter</option><option>door</option><option>other</option></select></label>
+    <label>Pose <select id="boxPose"><option value="">-</option><option>standing</option><option>sitting</option><option>lying</option><option>crouching</option><option>partly_covered</option></select></label>
+    <button id="addBox">+ Add object box (click 2 corners in top view)</button>
+    <div id="drawHint"></div>
+  </div>
+  <ol id="boxList"></ol>
+  <button id="saveLabels" class="primary">Save labels</button> <span id="saveStatus" style="color:var(--muted);font-size:12px"></span>
+</div>
+<div class="hint">Drag to orbit · right-drag to pan · scroll to zoom · colour = height (purple floor → yellow high) · white = live phone view</div>
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -76,7 +108,7 @@ function cloud(color, size) {
   return p;
 }
 const mapPts = cloud(null, 2);
-const framePts = cloud(0xffb454, 2);
+const framePts = cloud(0xffffff, 2);  // live frame in white: distinct from the yellow (high) end of the height ramp
 const trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff6b6b }));
 trail.frustumCulled = false;
 scene.add(trail);
@@ -84,18 +116,27 @@ const phone = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.M
 scene.add(phone);
 
 let zmin = 0, zmax = 1, lastMap = null, fitted = false, lastVoxels = 0;
-function fitView(xyz) {
-  // frame the map from above at an angle (robust bounds: 2nd-98th percentile)
-  const n = xyz.length / 3; if (n < 100) return;
-  const step = Math.max(1, Math.floor(n / 20000)), cols = [[], [], []];
+let userMoved = false, fitSpan = 0, mode = "3d", floorZ = null;
+controls.addEventListener("start", () => { userMoved = true; });  // stop auto-framing once you take over
+function bounds(xyz) {
+  const n = xyz.length / 3, step = Math.max(1, Math.floor(n / 20000)), cols = [[], [], []];
   for (let i = 0; i < n; i += step) for (let c = 0; c < 3; c++) cols[c].push(xyz[i * 3 + c]);
   const q = (a, f) => { a.sort((x, y) => x - y); return a[Math.floor(f * (a.length - 1))]; };
-  const lo = cols.map(a => q(a, 0.02)), hi = cols.map(a => q(a, 0.98));
-  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, cz = lo[2];
+  return { lo: cols.map(a => q(a, 0.01)), hi: cols.map(a => q(a, 0.99)) };
+}
+function fitView(xyz, view = mode) {
+  // robust bounds (2nd-98th percentile), grid on the floor, camera above at an angle (or straight down)
+  if (xyz.length / 3 < 100) return;
+  const { lo, hi } = bounds(xyz);
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, floor = lo[2];
   const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], 2);
-  controls.target.set(cx, cy, cz);
-  camera.position.set(cx - span * 0.3, cy - span * 0.9, cz + span * 1.1);
-  controls.update(); fitted = true;
+  const mid = (lo[2] + hi[2]) / 2;  // aim at mid-height: most points are on the walls, not the floor
+  floorZ = floor;
+  grid.position.set(Math.round(cx), Math.round(cy), floor);
+  controls.target.set(cx, cy, mid);
+  if (view === "top") camera.position.set(cx, cy - 0.01, mid + span * 1.9);
+  else camera.position.set(cx - span * 0.6, cy - span * 1.2, mid + span * 1.2);
+  controls.update(); fitted = true; fitSpan = span;
 }
 const ramp = [[0.27, 0.0, 0.33], [0.23, 0.32, 0.55], [0.13, 0.57, 0.55], [0.37, 0.79, 0.38], [0.99, 0.91, 0.14]];
 function heightColor(t, out, i) {
@@ -126,6 +167,86 @@ function setMap(xyz) {
   document.getElementById("npts").textContent = keep.length.toLocaleString();
 }
 
+// ------------------------------------------------------------------ labelling (ADR-0017)
+const BOX_COLORS = { person: 0xff5d8f, pet: 0xffb454, furniture: 0x5cc8ff, clutter: 0xb48cff, door: 0x7ee787, other: 0xcccccc };
+let boxes = [], boxHelpers = [], drawing = null;
+const $ = id => document.getElementById(id);
+
+function redrawBoxes() {
+  boxHelpers.forEach(h => scene.remove(h));
+  boxHelpers = boxes.map(b => {
+    const h = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)),
+                                   BOX_COLORS[b.label] ?? 0xffffff);
+    scene.add(h); return h;
+  });
+  $("boxList").innerHTML = "";
+  boxes.forEach((b, i) => {
+    const d = b.max.map((v, k) => (v - b.min[k]).toFixed(2));
+    const li = document.createElement("li");
+    li.textContent = `${b.label}${b.pose ? " (" + b.pose + ")" : ""} ${d[0]}×${d[1]}×${d[2]} m`;
+    const del = document.createElement("button"); del.textContent = "×"; del.title = "delete";
+    del.onclick = () => { boxes.splice(i, 1); redrawBoxes(); $("saveStatus").textContent = "unsaved changes"; };
+    li.appendChild(del); $("boxList").appendChild(li);
+  });
+}
+
+function floorPoint(ev) {
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(floorZ ?? -1.3)), hit) ? hit : null;
+}
+
+function boxFromCorners(a, b) {
+  // height from the map points inside the rectangle (ignores the ceiling: keeps points < 2.2 m above floor)
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+  const f = floorZ ?? -1.3, zs = [];
+  if (lastMap) for (let i = 0; i < lastMap.length; i += 3) {
+    const x = lastMap[i], y = lastMap[i + 1], z = lastMap[i + 2];
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && z > f + 0.03 && z < f + 2.2) zs.push(z);
+  }
+  zs.sort((p, q) => p - q);
+  const top = zs.length ? zs[Math.floor(0.98 * (zs.length - 1))] + 0.05 : f + 0.5;
+  return { label: $("boxLabel").value, pose: $("boxPose").value, min: [x0, y0, f], max: [x1, y1, Math.max(top, f + 0.1)],
+           points_inside: zs.length };
+}
+
+$("addBox").onclick = () => {
+  if (!lastMap) return;
+  mode = "top"; userMoved = false; fitView(lastMap, "top"); userMoved = true;  // hold the view still while drawing
+  drawing = { first: null }; controls.enabled = false;
+  $("drawHint").textContent = "Click the first corner on the floor plan (Esc to cancel)";
+};
+canvas.addEventListener("pointerdown", ev => {
+  if (!drawing) return;
+  const p = floorPoint(ev); if (!p) return;
+  if (!drawing.first) { drawing.first = p; $("drawHint").textContent = "Click the opposite corner"; return; }
+  const b = boxFromCorners(drawing.first, p);
+  drawing = null; controls.enabled = true;
+  if (b.max[0] - b.min[0] < 0.05 || b.max[1] - b.min[1] < 0.05) { $("drawHint").textContent = "Box too small; try again"; return; }
+  boxes.push(b); redrawBoxes();
+  $("drawHint").textContent = `Added ${b.label} (${b.points_inside} points inside). Remember to Save labels.`;
+  $("saveStatus").textContent = "unsaved changes";
+});
+addEventListener("keydown", ev => { if (ev.key === "Escape" && drawing) { drawing = null; controls.enabled = true; $("drawHint").textContent = "Cancelled"; } });
+
+$("saveLabels").onclick = () => {
+  if (!sock || sock.readyState !== 1) { $("saveStatus").textContent = "not connected"; return; }
+  const scn = { lights: $("lights").value, room: $("room").value, scene: $("sceneType").value, notes: $("notes").value };
+  Object.keys(scn).forEach(k => { if (!scn[k]) delete scn[k]; });
+  sock.send(JSON.stringify({ cmd: "labels", scene: scn, boxes: boxes.map(({ points_inside, ...b }) => b) }));
+  $("saveStatus").textContent = "saving…";
+};
+
+function onLabels(msg) {
+  $("scanName").textContent = msg.scan ?? "-";
+  const sc = msg.scene || {};
+  $("lights").value = sc.lights ?? ""; $("room").value = sc.room ?? ""; $("sceneType").value = sc.scene ?? ""; $("notes").value = sc.notes ?? "";
+  boxes = (msg.boxes || []).map(b => ({ ...b })); redrawBoxes();
+  $("saveStatus").textContent = msg.saved ? "saved ✓" : (boxes.length || Object.keys(sc).length ? "loaded" : "");
+}
+
 function onMessage(buf) {
   const dv = new DataView(buf);
   const hlen = dv.getUint32(0, true);
@@ -138,8 +259,21 @@ function onMessage(buf) {
   const tr = take(hdr.n_traj);
   if (hdr.voxels < lastVoxels * 0.5) fitted = false;  // map restarted (new segment): re-frame it
   lastVoxels = hdr.voxels ?? 0;
-  if (map) { setMap(map); if (!fitted) fitView(map); }
-  framePts.geometry.setAttribute("position", new THREE.BufferAttribute(frame, 3));
+  if (map) {
+    setMap(map);
+    // keep re-framing while the map grows, until the user moves the camera
+    if (!fitted) fitView(map);
+    else if (!userMoved) { const { lo, hi } = bounds(map); if (Math.max(hi[0] - lo[0], hi[1] - lo[1]) > fitSpan * 1.2) fitView(map); }
+  }
+  // the ceiling slider applies to the live frame too
+  const ceilPct = +document.getElementById("ceil").value / 100;
+  let shown = frame;
+  if (ceilPct < 1) {
+    const zcut = zmin + (zmax - zmin) * ceilPct, keep = [];
+    for (let i = 0; i < frame.length; i += 3) if (frame[i + 2] <= zcut) keep.push(frame[i], frame[i + 1], frame[i + 2]);
+    shown = new Float32Array(keep);
+  }
+  framePts.geometry.setAttribute("position", new THREE.BufferAttribute(shown, 3));
   framePts.visible = document.getElementById("showFrame").checked;
   trail.geometry.setAttribute("position", new THREE.BufferAttribute(tr, 3));
   if (hdr.pose) {
@@ -157,19 +291,29 @@ function onMessage(buf) {
   document.getElementById("valid").textContent = hdr.valid == null ? "-" : Math.round(hdr.valid * 100) + "%";
 }
 
+let sock = null;
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/map`);
+  sock = ws;
   ws.binaryType = "arraybuffer";
   const conn = document.getElementById("conn");
   ws.onopen = () => { conn.textContent = "connected"; };
-  ws.onmessage = e => onMessage(e.data);
+  ws.onmessage = e => (typeof e.data === "string" ? onLabels(JSON.parse(e.data)) : onMessage(e.data));
   ws.onclose = () => { conn.textContent = "reconnecting"; setTimeout(connect, 1000); };
 }
 connect();
+window.__echo = { camera, controls, grid, mapPts };  // debugging hook
 
 document.getElementById("size").oninput = e => { mapPts.material.size = framePts.material.size = +e.target.value; };
 document.getElementById("ceil").oninput = () => lastMap && setMap(lastMap);
-document.getElementById("reset").onclick = () => { if (lastMap) fitView(lastMap); };
+document.getElementById("reset").onclick = () => { mode = "3d"; userMoved = false; if (lastMap) fitView(lastMap); };
+document.getElementById("clear").onclick = () => {
+  if (!sock || sock.readyState !== 1) return;
+  if (!confirm("Clear the map and start a new scan? The current scan stays saved in its recording file.")) return;
+  sock.send("clear");
+  fitted = false; userMoved = false; lastMap = null;
+};
+document.getElementById("top").onclick = () => { mode = "top"; userMoved = false; if (lastMap) fitView(lastMap); };
 
 function resize() {
   const w = innerWidth, h = innerHeight;

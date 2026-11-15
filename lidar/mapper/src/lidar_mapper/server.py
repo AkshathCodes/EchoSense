@@ -78,7 +78,12 @@ class LiveMapper:
         self.rx = self.mapped = self.dropped = self.bad = 0
         self.seq = 0
         self.verbose = verbose
+        self.record_path = Path(record) if record else None
+        self.current_path = self.record_path  # recording file of the scan in progress
         self.record_fh = open(record, "ab") if record else None
+        self.scan_index = 1
+        self.pose_log: list[tuple] = []  # (t, seq, status, R9, t3, rmse, inliers, segment) per mapped frame
+        self.labels: dict = {"scene": {}, "boxes": []}  # labels drawn in viewer.html for this scan
         self.started = time.time()
         self._disp, self._disp_size, self._disp_map = None, 0, None
         self._disp_voxel = 0.05
@@ -119,6 +124,9 @@ class LiveMapper:
                 self.dropped += 1
                 return
             r = self.mapper.process(f)
+            m = self.mapper
+            self.pose_log.append((f.t, f.seq, r.status, r.R.reshape(-1).tolist(), r.t.tolist(), r.rmse,
+                                  r.inlier_frac, len(m.segments) + m.merges + m.resets))
             # Raw recordings retain the acquisition source in each depth-frame header.
             # Unknown legacy sources must never be inferred to be live phone data.
             acquisition = "simulated" if f.source in ("sim", "simulated", "synthetic") else (
@@ -284,18 +292,42 @@ class LiveMapper:
 
     async def dense_handler(self, conn, fps: float = 4.0) -> None:
         print("[map viewer] connected")
-        last_size, last_sent = -1, 0.0
+        state = {"last_size": -1, "last_sent": 0.0}
+
+        async def labels_msg(saved=None):
+            await conn.send(json.dumps({"type": "labels", **self.labels, "saved": saved,
+                                        "scan": self.current_path.name if self.current_path else None}))
+
+        async def commands():  # JSON commands from viewer.html buttons
+            async for msg in conn:
+                try:
+                    cmd = json.loads(msg) if isinstance(msg, str) and msg.startswith("{") else {"cmd": msg}
+                except ValueError:
+                    continue
+                if cmd.get("cmd") == "clear":
+                    await asyncio.to_thread(self.clear)
+                    state["last_size"] = -1  # push the (now empty) map right away
+                    await labels_msg()
+                elif cmd.get("cmd") == "labels":
+                    saved = await asyncio.to_thread(self.set_labels, cmd.get("scene", {}), cmd.get("boxes", []))
+                    await labels_msg(saved)
+
+        await labels_msg()  # restore this scan's labels after a page reload
+
+        cmd_task = asyncio.create_task(commands())
         try:
             while True:
                 size, now = len(self.mapper.map), time.time()
-                send_map = last_size < 0 or (size != last_size and now - last_sent > 1.0)
+                send_map = state["last_size"] < 0 or (size != state["last_size"] and now - state["last_sent"] > 1.0)
                 msg = await asyncio.to_thread(self.dense_snapshot, send_map)
                 if send_map:
-                    last_size, last_sent = size, now
+                    state["last_size"], state["last_sent"] = size, now
                 await asyncio.wait_for(conn.send(msg), timeout=10)
                 await asyncio.sleep(1 / fps)
         except (ConnectionClosed, asyncio.TimeoutError):
             pass
+        finally:
+            cmd_task.cancel()
         print("[map viewer] disconnected")
 
     # ---------------------------------------------------------------- status
@@ -323,11 +355,89 @@ class LiveMapper:
             if self.verbose:
                 print(self.status_line(), flush=True)
 
+    # ---------------------------------------------------------------- per-scan sidecars
+    def save_sidecars(self) -> list[str]:
+        """Save this scan's live map, live poses and labels next to its recording.
+
+        Labels are drawn on the *live* map, whose poses can differ slightly from a later replay
+        (the live mapper drops frames when busy). Export uses these files so boxes stay aligned.
+        """
+        if not self.current_path:
+            return []
+        out = []
+        with self.lock:
+            pts, cnt = self.mapper.map.points(2)
+            log = list(self.pose_log)
+            labels = json.loads(json.dumps(self.labels))
+        if log:
+            live = self.current_path.with_suffix(".live.npz")
+            np.savez_compressed(
+                live, map_points=pts.astype(np.float32), map_hits=cnt.astype(np.int32),
+                t=np.array([r[0] for r in log]), seq=np.array([r[1] for r in log], np.int64),
+                status=np.array([r[2] for r in log]), R=np.array([r[3] for r in log], np.float64),
+                pos=np.array([r[4] for r in log], np.float64), rmse=np.array([r[5] for r in log], np.float64),
+                inliers=np.array([r[6] for r in log], np.float64), segment=np.array([r[7] for r in log], np.int64),
+                voxel=np.array(self.mapper.map.voxel))
+            out.append(str(live))
+        if labels["scene"] or labels["boxes"]:
+            lab = self.current_path.with_suffix(".labels.json")
+            labels["scan_file"] = self.current_path.name
+            labels["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            lab.write_text(json.dumps(labels, indent=2))
+            out.append(str(lab))
+        return out
+
+    def set_labels(self, scene: dict, boxes: list) -> list[str]:
+        clean = []
+        for b in boxes[:200]:
+            lo, hi = [float(v) for v in b["min"]], [float(v) for v in b["max"]]
+            if len(lo) != 3 or len(hi) != 3 or any(h <= l for l, h in zip(lo, hi)):
+                continue
+            clean.append({"label": str(b.get("label", "other"))[:40], "pose": str(b.get("pose", ""))[:40],
+                          "min": lo, "max": hi, "note": str(b.get("note", ""))[:200]})
+        self.labels = {"scene": {str(k)[:40]: str(v)[:200] for k, v in (scene or {}).items()}, "boxes": clean}
+        saved = self.save_sidecars()
+        print(f"[labels] {len(clean)} boxes, scene {self.labels['scene']} -> {saved}", flush=True)
+        return saved
+
+    def clear(self) -> str:
+        """Wipe the map and start a fresh one; recording continues in a new file (<name>-scan2.esd, ...)."""
+        self.save_sidecars()  # keep the finished scan's live map/poses/labels
+        with self.lock:
+            self.pose_log = []
+            self.labels = {"scene": {}, "boxes": []}
+            m = self.mapper
+            m.reset()
+            m.segments, m.merges, m.relocalizations = [], 0, 0
+            m.need_reloc, m.last_seq, m.prev_time = False, -1, None
+            self.frame_points = np.zeros((0, 3))
+            self.last = None
+            self._disp, self._disp_size, self._disp_map = None, 0, None
+            self.scan_index += 1
+            note = "map cleared"
+            if self.record_path:
+                self.record_fh.close()
+                new = self.record_path.with_name(f"{self.record_path.stem}-scan{self.scan_index}{self.record_path.suffix}")
+                self.record_fh = open(new, "ab")
+                self.current_path = new
+                note += f"; now recording to {new}"
+            if self.sonar is not None:
+                # Sonar-only surfaces belong to the map that was just wiped; readings follow the new file.
+                self.sonar.surface, self.sonar._cells, self.sonar._streak = [], set(), []
+                if self.sonar.sidecar is not None and self.record_path:
+                    self.sonar.sidecar.close()
+                    self.sonar.sidecar = open(str(self.current_path) + ".sonar.jsonl", "a", encoding="utf-8")
+        print(f"[map] {note}", flush=True)
+        return note
+
     def close(self) -> None:
-        if self.record_fh:
-            self.record_fh.close()
-        if self.sonar is not None and self.sonar.sidecar is not None:
-            self.sonar.sidecar.close()
+        try:
+            self.save_sidecars()
+        finally:
+            if self.record_fh:
+                self.record_fh.close()
+            if self.sonar is not None and self.sonar.sidecar is not None:
+                self.sonar.sidecar.close()
 
 
 def dense_server(live: LiveMapper, port: int = 8780):
@@ -346,10 +456,10 @@ def dense_server(live: LiveMapper, port: int = 8780):
     async def handler(conn):
         await live.dense_handler(conn)
 
-    return serve(handler, "127.0.0.1", port, process_request=http, max_size=1024, compression=None)
+    return serve(handler, "127.0.0.1", port, process_request=http, max_size=512 * 1024, compression=None)
 
 
-async def run_server(live: LiveMapper, port: int = 8770, viewer_port: int = 8765, host: str = "0.0.0.0",
+async def run_server(live: LiveMapper, port: int = 8770, viewer_port: int = 8765, host: str | None = None,
                      viewer_fps: float = 5.0, origins: list[str] | None = None, map_port: int = 8780) -> None:
     async def phone(conn):
         await live.phone_handler(conn)
@@ -362,7 +472,10 @@ async def run_server(live: LiveMapper, port: int = 8770, viewer_port: int = 8765
             serve(viewer, "127.0.0.1", viewer_port, origins=(origins or VIEWER_ORIGINS) + [None],
                   max_size=1024, compression=None), \
             dense_server(live, map_port):
-        print(f"[server] phone -> ws://{host}:{port}/depth   EchoSense viewer -> ws://127.0.0.1:{viewer_port}/ws")
+        # host=None listens on every IPv4 *and* IPv6 address. An iPhone hotspot can be IPv6-only
+        # (the Mac then shows a 192.0.0.x CLAT address the phone can't reach), see lidar/README.md.
+        print(f"[server] phone -> ws://<this Mac>:{port}/depth (all IPv4 + IPv6 addresses)   "
+              f"EchoSense viewer -> ws://127.0.0.1:{viewer_port}/ws")
         print(f"[server] full-density map viewer -> http://127.0.0.1:{map_port}/")
         try:
             await asyncio.Future()

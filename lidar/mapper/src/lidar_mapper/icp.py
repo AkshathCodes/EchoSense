@@ -49,11 +49,15 @@ class ICPResult:
 def icp_point_to_plane(src: np.ndarray, tgt: np.ndarray, tgt_normals: np.ndarray, tree: cKDTree,
                        R0: np.ndarray, t0: np.ndarray, max_iter: int = 25, max_dist: float = 0.2,
                        min_dist: float = 0.05, rot_prior: np.ndarray | None = None,
-                       rot_prior_weight: float = 0.0, trans_damping: float = 1e-3) -> ICPResult:
+                       rot_prior_weight: float = 0.0, trans_damping: float = 1e-3,
+                       tilt_prior_weight: float = 0.0) -> ICPResult:
     """Find R, t minimizing sum((n_q . (R p + t - q))^2) over matched pairs.
 
     rot_prior: rotation the result should stay close to (e.g. IMU), weighted by
     rot_prior_weight (in residual units per radian, scaled by the number of matches).
+    tilt_prior_weight: extra weight on the roll/pitch part of that prior (rotation about the
+    world x/y axes). Gravity measures tilt to ~0.5 deg, far better than ICP on a few
+    surfaces, so tilt is held to the IMU while yaw and position stay free.
     trans_damping keeps translation stable along directions the scene doesn't constrain
     (a single flat wall).
     """
@@ -76,10 +80,10 @@ def icp_point_to_plane(src: np.ndarray, tgt: np.ndarray, tgt_normals: np.ndarray
         A = (J * wts[:, None]).T @ J
         b = -(J * wts[:, None]).T @ r
         A[3:, 3:] += np.eye(3) * trans_damping * len(r)
-        if rot_prior is not None and rot_prior_weight > 0:
-            lam = rot_prior_weight * len(r)
-            e = log_so3(rot_prior @ R.T)  # rotation still needed to reach the prior
-            A[:3, :3] += np.eye(3) * lam
+        if rot_prior is not None and (rot_prior_weight > 0 or tilt_prior_weight > 0):
+            lam = np.array([rot_prior_weight + tilt_prior_weight] * 2 + [rot_prior_weight]) * len(r)
+            e = log_so3(rot_prior @ R.T)  # rotation (world frame) still needed to reach the prior
+            A[:3, :3] += np.diag(lam)
             b[:3] += lam * e
         try:
             x = np.linalg.solve(A, b)

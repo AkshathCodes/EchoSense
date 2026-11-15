@@ -137,3 +137,27 @@ def remove_edge_pixels(depth: np.ndarray, rel_jump: float = 0.05) -> np.ndarray:
     bad[0, :] = bad[-1, :] = bad[:, 0] = bad[:, -1] = True  # roll wraps around at the borders
     d[bad] = np.nan
     return d
+
+
+def remove_grazing_pixels(depth: np.ndarray, K: np.ndarray, min_cos: float = 0.25) -> np.ndarray:
+    """Drop pixels whose surface is seen nearly edge-on (angle to the ray > ~75 deg at min_cos=0.25).
+
+    Depth on grazing surfaces is very noisy and smears along the ray; those readings make the
+    wispy "sheets" floating in free space. Normals come from neighbouring pixels.
+    """
+    h, w = depth.shape
+    v, u = np.mgrid[0:h, 0:w]
+    z = depth
+    x = (u - K[0, 2]) * z / K[0, 0]
+    y = (v - K[1, 2]) * z / K[1, 1]
+    P = np.stack([x, y, z], -1)
+    du = np.roll(P, -1, 1) - np.roll(P, 1, 1)
+    dv = np.roll(P, -1, 0) - np.roll(P, 1, 0)
+    n = np.cross(du, dv)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        n /= np.linalg.norm(n, axis=-1, keepdims=True)
+        ray = P / np.linalg.norm(P, axis=-1, keepdims=True)
+        cos = np.abs(np.sum(n * ray, -1))
+    d = depth.copy()
+    d[~(cos >= min_cos)] = np.nan  # also drops pixels whose normal is undefined (holes, borders)
+    return d

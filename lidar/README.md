@@ -99,6 +99,12 @@ Code: `mapper/src/lidar_mapper/sonar.py`, tests in `mapper/tests/test_sonar.py`.
 Bench tested with a real HC-SR04 on Windows and synthetic LiDAR input. The
 combined real iPhone and HC-SR04 setup still needs an alignment test.
 
+## Collecting labelled data
+
+See **[DATA_COLLECTION.md](DATA_COLLECTION.md)**: what to scan, the per-scan routine
+(**Clear map** → scan → **Label this scan** panel → boxes → **Save labels**), and
+export. Why it works this way: [ADR-0017](../sonar-ml/docs/decisions/0017-scan-labelling.md).
+
 ## Send scans to Databricks
 
 ```bash

@@ -18,14 +18,15 @@ LANDING = spark.conf.get("lidar.landing_path")  # noqa: F821 (provided by the pi
 SESSION_SCHEMA = """
   session_id STRING, export_version STRING, protocol_version STRING, mapper_version STRING,
   source_file STRING, exported_at STRING, recorded_at STRING, labels MAP<STRING, STRING>, notes STRING,
-  mapper_settings MAP<STRING, STRING>,
+  mapper_settings MAP<STRING, STRING>, map_source STRING,
+  annotations ARRAY<STRUCT<label STRING, pose STRING, min ARRAY<DOUBLE>, max ARRAY<DOUBLE>, note STRING>>,
   stats STRUCT<frames INT, app_sessions INT, duration_s DOUBLE, status_counts MAP<STRING, INT>,
                tracking_fraction DOUBLE, mean_valid_fraction DOUBLE, map_voxels BIGINT, map_points BIGINT,
                unmerged_segments INT, relocalizations INT, merges INT,
                floor STRUCT<ok BOOLEAN, floor_tilt_deg DOUBLE, floor_z DOUBLE, reason STRING>,
                extent_m ARRAY<DOUBLE>>
 """
-POSE_STATUSES = "('waiting', 'init', 'tracking', 'relocalized', 'merged', 'lost', 'arkit')"
+POSE_STATUSES = "('waiting', 'init', 'tracking', 'relocalized', 'merged', 'lost', 'arkit', 'not_processed')"
 
 
 def _autoload(fmt: str, sub: str, **opts):
@@ -79,6 +80,10 @@ def silver_lidar_sessions():
         F.col("j.stats.mean_valid_fraction").alias("mean_valid_fraction"),
         F.col("j.stats.map_points").alias("map_points"), F.col("j.stats.unmerged_segments").alias("unmerged_segments"),
         F.col("j.stats.floor.floor_tilt_deg").alias("floor_tilt_deg"), F.col("j.stats.extent_m").alias("extent_m"),
+        F.col("j.labels")["scene"].alias("scene"), "j.map_source",
+        # 'synthetic' = target inserted into a real empty-room scan (ADR-0018); filter on it for evaluation
+        F.coalesce(F.col("j.labels")["data_origin"], F.lit("real")).alias("data_origin"),
+        F.greatest(F.size("j.annotations"), F.lit(0)).alias("n_annotations"), "j.annotations",
         "ingested_at")
 
 
@@ -151,3 +156,43 @@ def gold_lidar_timeline():
              .agg(F.count("*").alias("frames"), F.avg("valid_fraction").alias("mean_valid_depth"),
                   F.avg(F.col("is_tracked").cast("double")).alias("tracked_fraction"),
                   F.avg("pos_x").alias("pos_x"), F.avg("pos_y").alias("pos_y")))
+
+
+# ---------------------------------------------------------------- labels (ADR-0017)
+
+@dlt.table(comment="Object boxes drawn in the live viewer, one row per box (map frame of that session, metres).")
+@dlt.expect_or_drop("box_has_extent", "x_max > x_min AND y_max > y_min AND z_max > z_min")
+@dlt.expect("known_label", "label IN ('person', 'pet', 'furniture', 'clutter', 'door', 'other')")
+def silver_lidar_annotations():
+    s = spark.readStream.table("silver_lidar_sessions").where("n_annotations > 0")  # noqa: F821
+    b = s.select("session_id", "lights", "room", "scene", "data_origin",
+                 F.posexplode("annotations").alias("box_id", "a"))
+    return b.select(
+        "session_id", "box_id", F.col("a.label").alias("label"), F.col("a.pose").alias("pose"),
+        F.col("a.note").alias("note"), "lights", "room", "scene", "data_origin",
+        F.col("a.min")[0].alias("x_min"), F.col("a.min")[1].alias("y_min"), F.col("a.min")[2].alias("z_min"),
+        F.col("a.max")[0].alias("x_max"), F.col("a.max")[1].alias("y_max"), F.col("a.max")[2].alias("z_max"))
+
+
+@dlt.table(comment="Map points inside each labelled box: the labelled point sets for embeddings/classification.")
+def gold_lidar_labeled_points():
+    pts = spark.read.table("silver_lidar_map_points").alias("p")  # noqa: F821
+    box = spark.read.table("silver_lidar_annotations").alias("b")  # noqa: F821
+    cond = ((F.col("p.session_id") == F.col("b.session_id"))
+            & F.col("p.x").between(F.col("b.x_min"), F.col("b.x_max"))
+            & F.col("p.y").between(F.col("b.y_min"), F.col("b.y_max"))
+            & F.col("p.z").between(F.col("b.z_min"), F.col("b.z_max")))
+    return pts.join(box, cond).select(
+        "p.session_id", "b.box_id", "b.label", "b.pose", "b.lights", "b.scene", "b.data_origin",
+        "p.x", "p.y", "p.z", "p.hits")
+
+
+@dlt.table(comment="One row per labelled box: size and how many map points support it.")
+def gold_lidar_annotation_summary():
+    lp = spark.read.table("gold_lidar_labeled_points")  # noqa: F821
+    counts = lp.groupBy("session_id", "box_id").agg(F.count("*").alias("points_inside"))
+    return (spark.read.table("silver_lidar_annotations")  # noqa: F821
+            .join(counts, ["session_id", "box_id"], "left").fillna({"points_inside": 0})
+            .withColumn("size_x_m", F.col("x_max") - F.col("x_min"))
+            .withColumn("size_y_m", F.col("y_max") - F.col("y_min"))
+            .withColumn("height_m", F.col("z_max") - F.col("z_min")))

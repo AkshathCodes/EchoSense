@@ -134,3 +134,58 @@ Recording `light-vs-dark.esd` (908 frames, 3 app sessions). Diagnosis by replay:
   floor tilt 0.5-4.2°. All sessions labelled `lights=unknown`. scan4 has 3 map
   segments despite 0 app restarts, so tracking was lost mid-scan twice and the
   segments didn't merge.
+
+## Connection trouble, viewer fixes, labelling (late session)
+- **Phone couldn't reach the Mac:** venue Wi-Fi (10.140/15) isolates clients. On the
+  iPhone hotspot the Mac showed **192.0.0.3/32**, a macOS CLAT address because the
+  hotspot was **IPv6-only** (T-Mobile). Fix: the mapper listens on all IPv4 + IPv6
+  addresses (`host=None`). The phone uses `ws://[<Mac IPv6>]:8770/depth`.
+- **Dense viewer showed only a corner:** the canvas had no CSS size, so at 2x DPI it rendered
+  at double size. Fixed with 100vw/100vh. Also: re-frames as the map grows until the user
+  moves the camera, floor-level grid, 3D/Top buttons.
+- **Clear map & start new scan** button: wipes the map and rotates the recording file
+  (`-scan2.esd`, …).
+- **Labelling (ADR-0017):** scene fields + 2-click top-view boxes in the viewer. Live map
+  and live poses are saved next to each recording (`.live.npz`, `.labels.json`) so export
+  keeps boxes aligned. Pipeline tables: `silver_lidar_annotations`,
+  `gold_lidar_labeled_points`, `gold_lidar_annotation_summary`. Tested end to end on a
+  simulated session (local Spark: 3,691 person + 4,420 furniture points inside boxes)
+  and in the browser (box drawn, height auto 0.35 m, saved). 14 tests pass.
+- Guide for the team: `lidar/DATA_COLLECTION.md`.
+
+## 2026-11-15: "wavy noise drifting in the room"
+Lead's screenshot: a person standing in an emptier area, wispy sheets in open space.
+Diagnosis on `data-day1-scan4` (and scan7, scan10):
+- Not speckle: stray points ~0.4%. Single frames have a thin floor (1.4 cm RMS).
+- **Tilt-to-gravity prior** in ICP (roll/pitch held to the IMU, yaw free): small effect
+  (scan7 floor 6.2 → 4.3 cm, scan4/10 about unchanged). Kept as the default (`tilt_prior_weight=5`).
+- **Focal length is not the cause:** scaling fx by 0.85-1.16 made nothing better than 1.0.
+- **Side slices showed the real cause:** floor and ceiling are thin lines, but wisps/streaks
+  float in free space, and the standing person was a solid smeared blob. Those are
+  grazing-angle and along-ray depth artifacts, each seen from one viewpoint.
+- Fix: **grazing-angle filter** (drop pixels whose surface is > ~75° to the ray) +
+  **free-space carving** (2,000 rays every 2nd frame; voxels seen through more often than
+  hit are hidden). Result: the person becomes a clean outline, wisps reduced, about 10% fewer
+  map points, +13 ms/frame (~94-103 ms). Streaks in areas seen from only one side remain
+  (nothing to carve them with).
+- Integration gates (skip frames with rmse > 2.2 cm or tilt > 1.5°) had no effect;
+  left off.
+- Better scans: view each area from 2+ directions so carving can remove its artifacts.
+
+## 2026-11-15: synthetic scans to finish the checklist (ADR-0018)
+
+- **Real scans:** 13 labelled in `data-day1b` (4 empty, 2 standing, 3 sitting, 4 lying). scan9 and
+  scan20 were broken by app restarts mid-scan and are left out of the export.
+- **Synthetic scans:** `lidar_mapper synth` inserted the 17 missing checklist scenes into real
+  empty-room scans 10, 13 and 14: 2 standing, 2 lying, 3 crouching, 4 partly covered, 3 pet,
+  3 mixed. Target surface noise is 1.3 cm against about 2 cm for real floors.
+- **Box check:** 0–11% of the points in each box were already in the base room. One cat scene
+  was regenerated because it landed against a wall (41%).
+- **Limits found:**
+  - The rooms are cluttered, so a lying person plus clutter does not fit; mixed scenes use
+    sitting and crouching people.
+  - Only 4 of 17 synthetic scans are lights-on, because the only lights-on empty base (scan13)
+    is 10 s long.
+  - All bases have Hole filling on.
+- **Databricks:** 11 real + 17 synthetic sessions uploaded; `data_origin` column added
+  (`real`/`synthetic`).
