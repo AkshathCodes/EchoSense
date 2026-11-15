@@ -4,8 +4,11 @@
  * The mapper sends its accumulated map to this viewer in the older sonar
  * envelope, marked `frame.meta.kind: "lidar_map"`. Points are X forward,
  * Y left, Z up, meters. The fourth value is the number of times a map cell was
- * hit (capped at 50), or exactly 100 for points of the live depth frame drawn
- * on top of the map.
+ * hit (capped at 50), exactly 100 for points of the live depth frame drawn on
+ * top of the map, or 200 for sonar-only surface points: places where the
+ * HC-SR04 heard an echo clearly nearer than anything the LiDAR saw (glass,
+ * mirrors). When a sonar is attached, `frame.meta.sonar` carries the latest
+ * cross-check (lidar/mapper/src/lidar_mapper/sonar.py).
  *
  * This module turns those messages into viewer frames with the room
  * classifier's surface classes, so Room analysis works on the mapper's output.
@@ -15,7 +18,27 @@
 import { classifyRoom, colorsFor } from './room-classifier.js';
 
 export const MAPPER_MAX_POINTS = 60000;
-const LIVE_COLOR = [1, 0.36, 0.25];
+const LIVE_COLOR = [1, 0.36, 0.25], SONAR_COLOR = [1, 0.25, 0.9];
+const sonarStates = ['no_sonar', 'agree', 'sonar_closer', 'lidar_no_return', 'sonar_farther'];
+const meters = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+
+/** Reads `meta.sonar`. Returns null when no sonar is attached or the block is malformed. */
+export function readSonarStatus(raw) {
+  if (!raw || typeof raw !== 'object' || !sonarStates.includes(raw.state)) return null;
+  return { state: raw.state, range: meters(raw.range_m), lidarNear: meters(raw.lidar_near_m),
+    lidarMedian: meters(raw.lidar_median_m), surfacePoints: Number.isSafeInteger(raw.surface_points) ? raw.surface_points : 0,
+    synthetic: raw.synthetic === true, blind: raw.state === 'sonar_closer' || raw.state === 'lidar_no_return' };
+}
+
+/** One line for the operator. Says plainly when the readings are simulated. */
+export function sonarText(sonar) {
+  const tag = sonar.synthetic ? 'Simulated sonar' : 'Sonar';
+  const reading = sonar.range === null ? 'no echo' : `${sonar.range.toFixed(2)} m`;
+  const lidar = sonar.lidarNear === null ? 'LiDAR no return' : `LiDAR ${sonar.lidarNear.toFixed(2)} m`;
+  const verdict = { agree: 'agree', sonar_closer: 'surface LiDAR cannot see', lidar_no_return: 'surface LiDAR cannot see',
+    sonar_farther: 'sonar missed the nearer surface', no_sonar: 'no fresh reading' }[sonar.state];
+  return `${tag} ${reading} · ${lidar} · ${verdict}`;
+}
 const finite = n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1000;
 
 /**
@@ -58,13 +81,16 @@ export function classifierSteps(nearest) {
 }
 
 export function createMapperSession() {
-  let analysis = classifyRoom(new Float32Array()), signature = '';
+  let analysis = classifyRoom(new Float32Array()), signature = '', sonarSurface = new Float32Array();
   return {
+    /** Sonar-only surface points from the latest frame, flat XYZ in viewer axes. */
+    get sonarSurface() { return sonarSurface; },
     /** Latest room classification of the map points. See src/room-classifier.js. */
     get analysis() { return analysis; },
     reset() {
       analysis = classifyRoom(new Float32Array());
       signature = '';
+      sonarSurface = new Float32Array();
     },
     /** Returns a viewer frame for mapper map messages, or undefined for any other payload. */
     async decode(payload) {
@@ -77,19 +103,23 @@ export function createMapperSession() {
       const rows = raw.frame.points;
       if (raw.protocol_version !== '0.1' || !Number.isSafeInteger(raw.sequence) || !Number.isFinite(raw.timestamp) ||
           !Array.isArray(rows) || rows.length > MAPPER_MAX_POINTS) throw new Error('Invalid mapper frame');
-      let mapCount = 0;
+      let mapCount = 0, sonarCount = 0;
       for (const row of rows) {
         if (!Array.isArray(row) || row.length !== 4 || !row.every(finite) || row[3] < 0) throw new Error('Invalid mapper point');
         if (row[3] < 100) mapCount++;
+        else if (row[3] >= 200) sonarCount++;
       }
-      // Map points first, live-frame points after, each converted to the viewer's Y-up axes.
+      // Map points first, then the live frame, then sonar-only surfaces, all in the viewer's Y-up axes.
+      const liveCount = rows.length - mapCount - sonarCount;
       const points = new Float32Array(rows.length * 3), hits = new Uint16Array(rows.length);
-      let m = 0, l = mapCount, hitSum = 0;
+      let m = 0, l = mapCount, s = mapCount + liveCount, hitSum = 0;
       for (const [x, y, z, strength] of rows) {
-        const i = strength < 100 ? m++ : l++;
+        const i = strength < 100 ? m++ : strength >= 200 ? s++ : l++;
         points.set([-y, z, -x], i * 3);
         if (strength < 100) { hits[i] = strength; hitSum += strength; }
       }
+      const sonar = readSonarStatus(raw.frame.meta.sonar);
+      sonarSurface = points.subarray((mapCount + liveCount) * 3);
       const map = points.subarray(0, mapCount * 3);
       // The mapper resends the same thinned map until it grows by 2%, so classify only on change.
       const next = `${mapCount}:${map[0]}:${map[map.length - 1]}:${hitSum}`;
@@ -99,12 +129,12 @@ export function createMapperSession() {
       }
       const colors = new Float32Array(rows.length * 3);
       colors.set(colorsFor(analysis.labels, mapCount));
-      for (let i = mapCount; i < rows.length; i++) colors.set(LIVE_COLOR, i * 3);
+      for (let i = mapCount; i < rows.length; i++) colors.set(i < mapCount + liveCount ? LIVE_COLOR : SONAR_COLOR, i * 3);
       return { points, colors, hits, frame: raw.sequence, captureTime: raw.timestamp,
         snr: mapCount ? hitSum / mapCount : null,
         sonar: { delivery: 'live', acquisition: 'live', detectionCount: null },
-        mapper: { mapPoints: mapCount, livePoints: rows.length - mapCount, objects: analysis.objects.length,
-          floorArea: analysis.floorArea, roomHeight: analysis.roomHeight } };
+        mapper: { mapPoints: mapCount, livePoints: liveCount, objects: analysis.objects.length,
+          floorArea: analysis.floorArea, roomHeight: analysis.roomHeight, sonar } };
     },
   };
 }

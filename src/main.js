@@ -5,7 +5,7 @@ import { openFeed } from './feed.js';
 import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
 import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL, LIDAR_REPLAY_BYTES, readLidarReplay } from './lidar.js';
 import { createCues } from './audio-cues.js';
-import { createMapperSession } from './mapper-adapter.js';
+import { createMapperSession, sonarText } from './mapper-adapter.js';
 import { drawRoomPlan } from './room-plan.js';
 import { classifyRoom, classNames } from './room-classifier.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
@@ -215,6 +215,7 @@ function showScanSource() {
   set('study', !live ? 'Living room / sample scan' : scan ? 'LiDAR · Spatial memory'
     : mapped ? 'LiDAR · Mapped room' : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
   el('mapper-tools').hidden = !mapped;
+  if (!mapped) el('sonar-readout').hidden = true;
   el('lidar-panel').hidden = !(live && scan);
   // In LiDAR mode the "color" render mode shows the classifier's surface classes.
   mode.querySelector('[value="color"]').textContent = live && (scan || mapped) ? 'Surface classes' : 'Natural color';
@@ -239,9 +240,10 @@ function showRoomAnalysis(force = false) {
     : savedMap ? classifyRoom(sample.points, { hits: sample.hits }) : lidar.analyse();
   // The mapper does not send the scanner path on this channel, so none is drawn.
   const { path, simulated } = sample.lidar ?? { path: [], simulated: false };
+  const sonarSurface = sample.mapper && !sample.lidar ? mapper.sonarSurface : [];
   const lastGap = path.lastIndexOf(null);
   // The plan renderer draws one polyline; avoid joining across missing poses.
-  drawRoomPlan(el('room-plan'), analysis, { path: path.slice(lastGap + 1), simulated });
+  drawRoomPlan(el('room-plan'), analysis, { path: path.slice(lastGap + 1), simulated, sonarSurface });
   const total = analysis.labels.length || 1;
   set('room-analysis-note', classNames.slice(1).map((name, i) =>
     `${name} ${Math.round(analysis.counts[i + 1] / total * 100)}%`).join(' · ') +
@@ -428,6 +430,13 @@ el('connection-form').addEventListener('submit', event => {
           const m = latest.mapper;
           note.textContent = `${numbers.format(m.mapPoints)} map points · ${m.objects} object${m.objects === 1 ? '' : 's'} · ` +
             `floor seen ${m.floorArea.toFixed(1)} m²` + (m.roomHeight === null ? '' : ` · ceiling ${m.roomHeight.toFixed(2)} m`);
+          const readout = el('sonar-readout');
+          readout.hidden = !m.sonar;
+          if (m.sonar) {
+            readout.textContent = sonarText(m.sonar) + (m.sonar.surfacePoints ? ` · ${m.sonar.surfacePoints} marked` : '');
+            readout.toggleAttribute('data-blind', m.sonar.blind);
+            if (m.sonar.blind) cues.play('lidar_blind');
+          }
           showRoomAnalysis();
         } else note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
           : `${latest.sonar.detectionCount} model detections.` : 'Receiving preview frames.';

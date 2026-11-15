@@ -32,6 +32,7 @@ MAX_VIEWER_POINTS = 20000  # EchoSense viewer limit
 MAX_DENSE_POINTS = 800000  # viewer.html (WebGL handles this easily)
 VIEWER_HTML = Path(__file__).with_name("viewer.html")
 FRAME_POINTS = 2500  # current frame, drawn on top of the map
+SONAR_STRENGTH = 200.0  # marks sonar-only surface points in the viewer envelope (map <= 50, live frame = 100)
 
 
 def write_record(fh, message: bytes) -> None:
@@ -67,6 +68,8 @@ class LiveMapper:
         self.started = time.time()
         self._disp, self._disp_size, self._disp_map = None, 0, None
         self._disp_voxel = 0.05
+        self.sonar = None  # optional SonarFusion (sonar.py)
+        self.sonar_replay: dict | None = None  # seq -> range, when replaying a recording with a sidecar
 
     # ---------------------------------------------------------------- phone side
     async def phone_handler(self, conn) -> None:
@@ -95,6 +98,11 @@ class LiveMapper:
             pts = backproject(f.depth, f.K, f.confidence, self.mapper.min_conf, max_range=self.mapper.max_range,
                               stride=2)
             self.frame_points = pts @ r.R.T + r.t
+            if self.sonar is not None:
+                if self.sonar_replay is not None:
+                    self.sonar.update(self.sonar_replay.get(f.seq))
+                self.sonar.observe(f.depth, f.K, r.R, r.t, tracking=r.status in ("tracking", "relocalized", "merged", "arkit"),
+                                   seq=f.seq)
             self.last = (f, r)
             self.mapped += 1
         return f, r
@@ -148,14 +156,21 @@ class LiveMapper:
                 if len(fp) > FRAME_POINTS:
                     fp = fp[np.random.default_rng(self.seq).choice(len(fp), FRAME_POINTS, replace=False)]
                 rows += [[round(float(x), 3), round(float(y), 3), round(float(z), 3), 100.0] for x, y, z in fp]
+            meta = {"format_version": "0.2", "source": "live", "sensor_id": "iphone-lidar",
+                    "tilt_deg": 0.0, "kind": "lidar_map", "view": self.view}
+            if self.sonar is not None:
+                # Sonar-only surfaces go last so they survive the point cap, which trims map points first.
+                extra = [[round(float(x), 3), round(float(y), 3), round(float(z), 3), SONAR_STRENGTH]
+                         for x, y, z in self.sonar.surface]
+                rows = rows[:max(0, MAX_VIEWER_POINTS - len(extra))] + extra
+                meta["sonar"] = dict(self.sonar.status)
             t = float(self.last[0].t) if self.last else 0.0
         self.seq += 1
         return json.dumps({
             "protocol_version": "0.1", "type": "sonar_frame", "sequence": self.seq, "timestamp": t,
             "source": "live", "acquisition_source": "live",
             "frame": {"format_version": "0.2",
-                      "meta": {"format_version": "0.2", "source": "live", "sensor_id": "iphone-lidar",
-                               "tilt_deg": 0.0, "kind": "lidar_map", "view": self.view},
+                      "meta": meta,
                       "points": rows[:MAX_VIEWER_POINTS]},
             "detections": None,
         })
@@ -223,7 +238,15 @@ class LiveMapper:
         return (f"[map] rx {self.rx} mapped {self.mapped} dropped {self.dropped} | {r.status:8s} "
                 f"pos ({r.t[0]:+.2f},{r.t[1]:+.2f},{r.t[2]:+.2f}) m | valid depth {f.valid_fraction:.0%} | "
                 f"rmse {r.rmse * 100:.1f} cm | grav err {r.gravity_err_deg:.1f} deg | {lux} | "
-                f"map {len(self.mapper.map)} voxels")
+                f"map {len(self.mapper.map)} voxels" + self._sonar_text())
+
+    def _sonar_text(self) -> str:
+        if self.sonar is None:
+            return ""
+        s = self.sonar.status
+        reading = "no reading" if s.get("range_m") is None else f"{s['range_m']:.2f} m"
+        lidar = "" if s.get("lidar_near_m") is None else f" vs lidar {s['lidar_near_m']:.2f} m"
+        return f" | sonar {reading}{lidar} {s['state']} ({len(self.sonar.surface)} sonar-only pts)"
 
     async def status(self, every: float = 1.0) -> None:
         while True:
@@ -234,6 +257,8 @@ class LiveMapper:
     def close(self) -> None:
         if self.record_fh:
             self.record_fh.close()
+        if self.sonar is not None and self.sonar.sidecar is not None:
+            self.sonar.sidecar.close()
 
 
 def dense_server(live: LiveMapper, port: int = 8780):
