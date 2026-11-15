@@ -120,3 +120,8 @@ Archive: `C:/Users/charv/Downloads/madhacks-sonar-main.zip`, prefix
 - `perception/src/sonar_perception/sources/recorded.py`
 
 This workspace changes none of these contracts or source files.
+
+## LiDAR
+
+LiDAR uses a separate transport and message format. See [LIDAR_PROTOCOL.md](LIDAR_PROTOCOL.md).
+Nothing in this document applies to it, and LiDAR points never pass through the sonar envelope.

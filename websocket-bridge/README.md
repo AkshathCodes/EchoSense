@@ -4,6 +4,26 @@ Proposed integration transport for Rishi's sonar data and Akshath's existing
 frontend. No frontend, model, hardware interface, or old spatial package is
 included or imported. See PROTOCOL.md before connecting the frontend.
 
+## LiDAR mode
+
+Real iPhone LiDAR uses its own endpoints and message format, kept apart from
+the sonar path. Full contract: [LIDAR_PROTOCOL.md](LIDAR_PROTOCOL.md).
+
+```powershell
+# live: phone publishes to /lidar/publish, browser reads /lidar/view
+.\.venv\Scripts\python.exe -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
+# replay a recording to /lidar/view at 3 frames a second
+.\.venv\Scripts\python.exe -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
+# no phone: SYNTHETIC publisher, labeled as such in every frame
+.\.venv\Scripts\python.exe -B fake_phone.py
+```
+
+On macOS or Linux the interpreter is `.venv/bin/python`. `--lidar` binds all
+interfaces so the phone can connect and prints the address to enter in the
+app; use `--host` to bind one address. No TLS, no authentication.
+`sonar_bridge/lidar.py` holds validation, the hub, recording and replay;
+`tests/test_lidar.py` covers them.
+
 ## Windows PowerShell setup and launch
 
 ```powershell
@@ -97,3 +117,64 @@ No actual hardware/model stream or Akshath frontend has been integration-tested.
 Everything belongs to this isolated workspace. No Git repository is initialized.
 The archive was inspected read-only; no Rishi/Akshath project files were copied
 or modified. This bridge doesn't alter SonarFrame v0.2 or detections v0.1.
+
+
+## Independent sonar / range integration
+
+The range path carries individual distance observations, not a point cloud.
+It does not infer sensor pose, fuse distances into LiDAR, run a classifier,
+or claim that an unobserved area is clear. The existing `/ws` sonar stream
+and optional LiDAR service retain their original schemas.
+
+Run these commands from this worktree's `websocket-bridge` directory in
+separate PowerShell terminals (Python 3.11+ and Node 22+ for the smoke test):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e '.[test,serial]'
+.\.venv\Scripts\python.exe -B -m sonar_bridge --range --lidar --origin http://127.0.0.1:4180 --range-record recordings/range-session.jsonl
+.\.venv\Scripts\python.exe -B range_readout.py
+.\.venv\Scripts\python.exe -B -m sonar_bridge.range_adapter --fixture fixtures/range-synthetic.txt --format meters-line
+```
+
+Open http://127.0.0.1:4180/ and connect before starting the fixture.
+The bridge, adapter and readout default to port 8765; a custom bridge
+`--port` also requires the adapter `--url` and readout URL to match.
+The static readout serves only its three public assets, never recordings.
+Use a new recording filename for each capture: existing files are refused.
+For the existing LiDAR viewer, also allow its origin with
+`--origin http://127.0.0.1:4173`. Range mode binds loopback by default;
+explicitly select `--host` if a verified LAN device needs access.
+
+Replay without a sensor:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m sonar_bridge --range-replay recordings/range-session.jsonl --origin http://127.0.0.1:4180
+.\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider
+.\.venv\Scripts\python.exe -B range_smoke_test.py
+```
+
+Observations preserve sensor/session IDs, increasing sequence, timestamp and
+clock basis, original units and raw value, normalized meters, availability,
+and acquisition provenance. Missing/invalid returns have null distance.
+Replay retains acquisition provenance and is separately labeled REPLAY.
+The bounded processing window defaults to five samples, at least three valid
+samples and a valid majority, with at most 0.35 m spread. A missing latest
+reading withholds the median. Optional outlier filtering and tape-reference
+error are explicit policy settings saved in the recording, not confidence
+or accuracy claims. Limits: 32 sensors, 128 sessions per bridge lifetime;
+restart the bridge for a fresh session budget. Recording limits are 10,000
+observations or 16 MiB; failures stop forwarding the affected publication.
+
+Hardware remains BLOCKED until the exact sensor and controller models,
+datasheets, power/logic voltages, wiring, baud rate, output format, units,
+range limits and timeout semantics are verified. No port is auto-probed.
+`--serial` requires `--hardware-verified`, `--sensor-id`, `--sensor-model`,
+`--modality`, `--baud`, `--min-m`, `--max-m` and an explicit `--format`.
+That flag records operator authorization; it does not verify the hardware.
+Current serial formats are positive decimal meters per newline, or structured
+JSON with `distance`, `units` (m/cm/mm), and `status` (valid/timeout/no_return).
+An optional controller timestamp must include its timestamp basis. Other
+firmware protocols require an adapter after their format is confirmed.
+Physical acquisition, tape-distance checks, disconnect recovery on an actual
+controller and sensor-to-LiDAR pose calibration still need hardware testing.

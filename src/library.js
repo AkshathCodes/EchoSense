@@ -1,6 +1,8 @@
 import { comparable, compareReturns } from './archive.js';
 import { createViewer } from './viewer.js';
 import { sonarLabel } from './sonar.js';
+import { lidarLabel } from './lidar.js';
+import { mapperLabel } from './mapper-adapter.js';
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const format = new Intl.NumberFormat('en-US');
@@ -58,7 +60,9 @@ export function createLibrary({ show, open, scan }) {
     const thumb = node('img');
     thumb.src = map.thumb;
     thumb.alt = '';
-    const badge = node('span', map.sonar ? sonarLabel(map.sonar) : map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
+    const badge = node('span', map.mapper ? mapperLabel({ ...map.mapper, delivery: 'recorded' })
+      : map.lidar ? lidarLabel({ ...map.lidar, mode: 'replay' })
+      : map.sonar ? sonarLabel(map.sonar) : map.source === 'live' ? 'Live capture' : 'Mock', 'map-source');
     badge.dataset.source = map.source;
     preview.append(thumb, badge);
     const info = node('div', '', 'map-info');
@@ -92,7 +96,7 @@ export function createLibrary({ show, open, scan }) {
     const count = maps.filter(map => map.source === 'live').length;
     el('total-maps').textContent = maps.length;
     el('live-maps').textContent = count;
-    el('mock-maps').textContent = maps.length - count;
+    el('mock-maps').textContent = maps.filter(map => map.source === 'mock').length;
     list.replaceChildren(...filtered.map(card));
     if (!filtered.length && archive) list.append(node('p', maps.length
       ? 'No maps match your search.' : 'No maps saved yet. Capture a snapshot from the scanner.', 'empty-maps'));
@@ -173,7 +177,7 @@ function mountComparison([first, second]) {
   el('second-map').textContent = second.name;
   const viewers = [];
   let fitPoints;
-  if (!aligned && (first.sonar || second.sonar)) {
+  if (!aligned && (first.sonar || second.sonar || first.lidar || second.lidar)) {
     fitPoints = new Float32Array(first.points.length + second.points.length);
     fitPoints.set(first.points);
     fitPoints.set(second.points, first.points.length);
@@ -194,7 +198,7 @@ function mountComparison([first, second]) {
       panes[i].replaceChildren(canvas);
       viewers[i] = createViewer(canvas, { cloud: new Float32Array(), mesh: new Float32Array() },
         (camera, view) => viewers[1 - i]?.follow(camera, view));
-      viewers[i].replaceCloud(map.points);
+      viewers[i].replaceCloud(map.points, map.colors);
     }
     if (aligned) viewers[1].replaceChanges(diff);
     if (fitPoints) viewers[0].frameCloud(fitPoints);

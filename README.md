@@ -1,18 +1,149 @@
 # EchoSense
 
-An interactive room scan viewer for the EchoSense headset project. The UI
-starts with **Mock data**, a modeled living room and simulated sensor readings.
+ECHO RESCUE maps an indoor space with an iPhone Pro's LiDAR, without relying
+on visible light, and keeps what it saw. It builds a 3D map as the operator
+moves, sorts it into floor, walls and objects, and draws a floor plan that
+marks what was never observed. The use case is simulated search-and-rescue
+planning.
 
-## Run locally
+It does not see through walls or smoke, detect people behind obstacles, or
+make a phone an operational firefighting device. Not observed never means safe.
 
-Use Node.js 20 or later.
+```
+iPhone Pro LiDAR + motion sensors      Mac mapper (lidar/mapper)        Viewer (src/)
+capture app (lidar/ios)            ->  position from depth + IMU    ->  surface classes,
+no camera images used                  dense voxel map, recording       room analysis, floor plan
+```
+
+This is the path that has run on a real phone
+([log](sonar-ml/docs/log/2026-11-14-iphone-lidar-pivot.md)). Full darkness
+has not been tested yet.
+
+## Quick start
+
+Needs Node 20+ and Python 3.11+ (macOS ships 3.9: `brew install python@3.12`).
+A real scan also needs an iPhone Pro with the capture app from `lidar/ios/`
+([build steps](lidar/README.md)).
+
+On macOS or Linux, one command sets up and starts the mapper and the viewer:
+
+```sh
+scripts/run-lidar.sh --mapper                  # live: phone streams to the mapper, session recorded
+scripts/run-lidar.sh --mapper-sim              # no phone: the mapper's SIMULATED room
+scripts/run-lidar.sh --mapper-replay lidar/mapper/recordings/<file>.esd
+```
+
+Open `http://127.0.0.1:4173/`, set **Sensor feed** to **Sonar / Preview**
+(address `ws://127.0.0.1:8765/ws`), and click **Connect**. The badge reads
+**LiDAR map**, points are coloured by surface class, and **Room analysis**
+draws the floor plan. **Open dense map** shows the mapper's full-density view.
+
+The mapper viewer uses the existing **LiDAR surface forest v1** weights on
+the accumulated map. Classification runs locally in a browser worker. Live
+depth points keep their separate overlay color. Room analysis, saved mapper
+scans, and PNG exports use the predictions for that map, with footprints,
+class totals, and separate ceiling and uncertain-return layers. The viewer
+uses the geometric classifier if trained inference fails. The weights were
+trained on synthetic scans and have not been validated on real mapper data.
+If the phone stops sending depth or the mapper disconnects, the viewer keeps
+the last observed map as historical and marks current sonar readings unavailable.
+
+With an HC-SR04 strapped to the phone ([guide](hardware/hcsr04/README.md)),
+`SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper` adds a sonar
+cross-check: the viewer shows the sonar and LiDAR distances side by side and
+marks possible sonar-only surfaces in magenta. Reflections from glass can
+produce this result, but the marker does not identify the material.
+`SONAR_SIM=1 scripts/run-lidar.sh --mapper-sim` shows it with simulated
+readings. The HC-SR04 and XIAO nRF52840 Sense passed a Windows serial bench
+test with a synthetic LiDAR publisher. Combined operation with a real iPhone
+and sensor alignment still need testing.
+
+With nothing running, `node serve.js` shows the viewer on built-in mock data.
+
+### Two LiDAR paths, one port
+
+| Path | Phone app | Laptop | Viewer feed | State |
+|---|---|---|---|---|
+| **Mapper (demo)** | `lidar/ios/` | `lidar/mapper/` | Sonar / Preview, `/ws` | Run on a real phone |
+| Bridge (fallback) | `ios-lidar/` | `websocket-bridge/ --lidar` | iPhone LiDAR, `/lidar/view` | App never compiled; synthetic frames only |
+
+Both serve the viewer on port 8765, so run one at a time. The bridge path adds
+a coverage map, scanner path and audio cues that the mapper path does not
+feed yet. `scripts/run-lidar.sh` with no argument, `--fake` or `--replay`
+starts the bridge path.
+
+## Bridge path: LiDAR spatial memory
 
 ```sh
 node serve.js
+cd websocket-bridge
+python3 -m venv .venv && .venv/bin/pip install -e .   # needs Python 3.11 or later
+.venv/bin/python -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/` in a WebGL-capable browser. There are no packages
-to install. Stop the static development server with Ctrl+C.
+Open `http://127.0.0.1:4173/`, select **iPhone LiDAR**, and click **Connect** (the address defaults to
+`ws://127.0.0.1:8765/lidar/view`). Then publish frames from the phone
+([ios-lidar/README.md](ios-lidar/README.md)) or, with no phone, from the
+labeled synthetic publisher: `.venv/bin/python -B fake_phone.py` in `websocket-bridge/`.
+
+What the viewer adds on top of the point cloud:
+
+- **Persistence.** Points are kept in a 5 cm voxel grid (`src/spatial-memory.js`),
+  capped at 120,000 cells, so geometry stays after the scanner turns away.
+- **Scanner path.** The green trail and marker show the scanner's recorded
+  positions. The path breaks across tracking loss and paused display updates.
+- **Coverage map.** A plan view in 25 cm cells: *Surface* (a return landed
+  there above floor level), *Seen through* (a sensor ray crossed it), and
+  *Not observed*. A cell counts as seen if one ray crossed it at any height,
+  which is weaker than "empty". Not observed means no measurement.
+- **Tracking honesty.** Frames sent while ARKit tracking is not normal are
+  counted and not stored. A new phone session clears the map instead of
+  merging two origins.
+- **Surface classes.** A geometric classifier (`src/room-classifier.js`) labels
+  every retained point as floor, wall, ceiling or object and colours the cloud
+  by class (the "Surface classes" render mode, on by default for LiDAR). It is
+  a set of rules on room geometry, not a trained network: floor and ceiling
+  are the busiest height layers at the bottom and top, a wall is a 10 cm
+  column filled over at least 1.2 m of height, and everything else is an
+  object. Tall cabinets and doors count as walls.
+- **Room analysis.** The button in the LiDAR panel draws a labelled floor plan
+  (`src/room-plan.js`): walls, floor seen, each object with a letter and its
+  height, the scanner path, a 1 m scale bar, and black for not observed.
+  **Download PNG** saves it. Objects are measured, not identified.
+- **Audio cues** (off by default): session started, tracking lost and
+  restored, phone connected and lost, snapshot saved, replay complete.
+- **Pause display** skips browser updates while the bridge keeps recording.
+  **Clear map** holds the browser map empty until you resume. **Disconnect**
+  preserves the last scan for **Save snapshot** and review in Saved Maps.
+
+The source badge reads **Live LiDAR** only for `source: arkit_scene_depth`
+frames in live mode. Synthetic frames read **Simulated LiDAR**, and bridge
+replays read **LiDAR replay**.
+
+Replay a recorded session:
+
+```sh
+.venv/bin/python -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
+```
+
+Connect to that replay bridge, or choose the bridge's JSONL file (up to 16 MB)
+with **Open LiDAR replay**. Use **Room analysis** during scanning or replay to
+inspect the current observations and export the floor plan. Saved maps retain
+surface colors and keep different ARKit coordinate sessions separate.
+
+How well it does, on simulation only (`test/scan-simulator.js` ray-casts a
+furnished room at the phone's sampling density with range noise and stray
+returns): 91 to 96% of points labeled correctly across a typical 40 s scan, a
+12 s scan, a scan that never looks up, and a noisy one. The sofa, table and
+crate are found with heights within about 5 cm; footprints come out up to
+30 cm too large. Known weak spots: a wall that has only been partly scanned
+is listed as an object until more of it is seen, the bottom 10 cm of walls
+and furniture is labeled floor, and anything taller than 1.2 m (a person, a
+door, a cabinet) is labeled wall. It has not been scored on a real scan.
+
+Not verified: the iPhone app has never been compiled, and no real LiDAR frame
+has passed through this pipeline. Everything above was exercised with
+synthetic frames only.
 
 ## Viewer controls
 
@@ -63,6 +194,72 @@ Reloading the same URL keeps the maps. Clearing this site's browser data
 removes them. Maps are not synced or uploaded. The scanner on the Scan
 tab keeps receiving socket messages while a saved map is open.
 
+## Verify
+
+```sh
+node --test                                         # viewer, adapter, spatial memory, classifier
+cd lidar/mapper && .venv/bin/python -m pytest       # mapper
+cd websocket-bridge && .venv/bin/python -m pytest   # bridge
+```
+
+The tests cover LiDAR frame decoding, voxel filtering, coverage cells, room
+classification on a labeled synthetic room, audio cue
+rate limiting, preview payload conversion, malformed or oversized points,
+decoder injection and disconnect, replay sample selection, and cell-based
+change detection. For visual verification, load the page
+and switch between all three camera and render modes. Change the vertex cap
+and point size, enable Grid and RF rings, and try orbit, pan, and zoom.
+At a phone width the controls start collapsed and can be opened above the
+viewport. The browser check used a local WebSocket fixture to verify geometry
+replacement, telemetry, invalid message handling and disconnect recovery.
+
+## Repository layout
+
+| Path | What | Owner |
+|---|---|---|
+| `lidar/` | **Demo path.** iPhone capture app, Mac mapper, dense viewer, Databricks export | Rishi |
+| `ios-lidar/` | Fallback ARKit app for the bridge path, never compiled | Ryan |
+| `websocket-bridge/` | Python bridge, [LiDAR protocol](websocket-bridge/LIDAR_PROTOCOL.md), record and replay | Charvik |
+| `index.html`, `style.css`, `serve.js`, `src/` | Web viewer and LiDAR rendering | Akshath |
+| `src/mapper-adapter.js`, `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js` | Mapper adapter, spatial memory, room classification, floor plan, audio cues | Ryan |
+| `test/` | Viewer tests, including the scan simulator | viewer and Ryan |
+| `docs/` | [Demo plan](docs/DEMO.md) | Ryan |
+| `hardware/hcsr04/` | HC-SR04 sonar: firmware, [wiring and mounting guide](hardware/hcsr04/README.md) | Ryan |
+| `scripts/` | Setup and run helpers | shared |
+| `acoustic/`, `sonar-ml/` | Earlier sonar work, simulated data only | Ryan, Rishi |
+
+Rules for working in the repo are in [AGENTS.md](AGENTS.md).
+
+### Branches
+
+- `main`: what the team has agreed to demo. Merge only after telling the team.
+- `develop`: integrated work waiting to go to `main`.
+- Your own work: `<area>/<short-name>`, for example `ios/pose-fix`,
+  `bridge/replay-speed`, `viewer/trail-colour`, `memory/change-detection`.
+  Open a pull request into `develop`.
+
+# Earlier work
+
+The sections below describe the mock scene and the sonar and acoustic
+pipelines built before the switch to LiDAR. They still run, on simulated data.
+
+## The mock scene
+
+The UI starts with **Mock data**, a modeled living room. The earlier sonar
+simulation, ML and acoustic scanner are still in the repo and still run on
+simulated data only.
+
+### Run the viewer alone
+
+Use Node.js 20 or later.
+
+```sh
+node serve.js
+```
+
+Open `http://127.0.0.1:4173/` in a WebGL-capable browser. There are no packages
+to install. Stop the static development server with Ctrl+C.
+
 ## Geometry and reference choices
 
 The references use several rendering styles and show different interiors. The
@@ -79,7 +276,7 @@ modeled from visible silhouettes and relationships, with rounded cushions,
 shelves, individual books, and a lamp. Front and left walls are open for the
 cutaway. The wireframe and points are generated from surfaces at startup.
 
-## Backend handoff
+## Sonar bridge handoff
 
 To use the team's sonar WebSocket bridge, start it in a second terminal from
 the repository root using Python 3.11+:
@@ -91,8 +288,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -B -m sonar_bridge --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/` and click **Connect**. The default address is
-`ws://127.0.0.1:8765/ws`. Match `--origin` to the exact frontend host and port
+Open `http://127.0.0.1:4173/`, select **Sonar / Preview**, and click
+**Connect**. Match `--origin` to the exact frontend host and port
 if you use a different URL. The default bridge stream is a simulated 45-point
 wall with no model detections. For NPZ recordings with optional detection JSON,
 see [bridge setup and manifest format](websocket-bridge/README.md). On normal
@@ -177,18 +374,3 @@ cd sonar-ml
 python3 -m venv .venv && .venv/bin/pip install -e "perception[dev]"
 cd perception && ../.venv/bin/python -m pytest
 ```
-
-## Verify
-
-```sh
-node --test
-```
-
-The tests cover preview payload conversion, malformed or oversized points,
-decoder injection and disconnect, replay sample selection, and cell-based
-change detection. For visual verification, load the page
-and switch between all three camera and render modes. Change the vertex cap
-and point size, enable Grid and RF rings, and try orbit, pan, and zoom.
-At a phone width the controls start collapsed and can be opened above the
-viewport. The browser check used a local WebSocket fixture to verify geometry
-replacement, telemetry, invalid message handling and disconnect recovery.

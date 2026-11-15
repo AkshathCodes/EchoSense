@@ -41,6 +41,8 @@ canvas.dragging { cursor: grabbing; }
 .view-actions button[aria-pressed="true"] { background: #1a3446; border-color: #2c5268; color: #b8e7ff; }
 .instrument { position: absolute; right: 19px; top: 18px; width: 242px; border: 1px solid #303f4e; background: #101720f2; border-radius: 4px; box-shadow: 0 3px 14px #0007; }
 .instrument-title { min-height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 11px; background: #151e29; border-radius: 3px 3px 0 0; }
+.instrument { display: flex; flex-direction: column; max-height: calc(100% - 65px); }
+#control-body { overflow-y: auto; }
 h2 { margin: 0; font-size: 12px; font-weight: 650; letter-spacing: .13px; }
 .collapse { height: 24px; min-width: 24px; line-height: 1; font-size: 16px; }
 .controls, .connection { padding: 6px 10px 8px; border-top: 1px solid #273542; }
@@ -61,6 +63,7 @@ input[type="checkbox"] { margin: 0; width: 13px; height: 13px; accent-color: #70
 .connection input { min-width: 0; width: 100%; padding: 5px; font: 10px var(--mono); }
 .connection button { padding: 5px 7px; font-size: 11px; white-space: nowrap; }
 #connection-note { margin: 7px 0 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+.lidar-file { flex-direction: column; align-items: stretch; gap: 2px; margin-top: 8px; }
 .view-tools { right: 19px; bottom: 21px; gap: 4px; }
 .view-tools button { width: 34px; height: 32px; color: #d4e6f1; font-size: 19px; line-height: 1; background: #101923e8; }
 .view-tools button:hover { background: #20313f; }
@@ -71,6 +74,9 @@ input[type="checkbox"] { margin: 0; width: 13px; height: 13px; accent-color: #70
 .target-marker, .anchor-label { position: absolute; pointer-events: none; transform: translate(-50%, -105%); font: 10px var(--mono); white-space: nowrap; }
 .target-marker { color: #ffc785; border: 1px solid #a7733b; border-radius: 3px; background: #221811ed; padding: 4px 7px; }
 .target-marker i { display: inline-block; width: 5px; height: 5px; margin-right: 6px; background: var(--amber); border-radius: 50%; vertical-align: 2px; }
+.scanner-marker { color: #a0f0d4; border-color: #477d71; background: #10211eee; }
+.scanner-marker i { background: var(--green); }
+.lidar-legend { flex-wrap: wrap; gap: 6px 14px; }
 .anchor-label { color: #a0f0d4; padding: 3px; text-shadow: 0 1px 4px #000; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 22px; border-top: 1px solid var(--line); color: var(--muted); background: #0c121a; font: 11px var(--mono); }
 .telemetry { display: flex; gap: 24px; white-space: nowrap; }
@@ -205,3 +211,30 @@ dialog form > div { display: flex; justify-content: flex-end; gap: 7px; }
   .source { font-size: 10px; padding-inline: 2px; }
   .instrument { width: 164px; }
 }
+
+/* LiDAR spatial memory panel */
+.lidar-panel canvas { position: static; height: auto; cursor: default; width: 100%; margin: 6px 0 4px; border: 1px solid #273542; border-radius: 3px; }
+.lidar-panel .coverage-key, .lidar-panel .caveat { margin: 3px 0 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+.lidar-panel .coverage-key i { display: inline-block; width: 8px; height: 8px; margin: 0 3px 0 6px; border: 1px solid #365065; }
+.lidar-panel .coverage-key i:first-child { margin-left: 0; }
+.lidar-panel .surface { background: #63d6f2; }
+.lidar-panel .seen { background: #1d4a5c; }
+.lidar-panel .unknown { background: #070d13; }
+.lidar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; font-size: 11px; }
+.lidar-actions button, .lidar-actions label { white-space: nowrap; }
+.lidar-actions button { padding: 4px 7px; font-size: 11px; }
+
+/* Room analysis overlay */
+.room-analysis { position: absolute; inset: 56px 262px 46px 20px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #080d13f5; border: 1px solid #365065; border-radius: 6px; }
+.room-analysis canvas { position: static; flex: 1; min-height: 0; width: 100%; height: auto; object-fit: contain; cursor: default; }
+.room-analysis-bar { display: flex; align-items: center; gap: 10px; font: 11px var(--mono); color: #a9bfd0; }
+.room-analysis-bar span { flex: 1; }
+.room-analysis-bar a, .room-analysis-bar button { padding: 5px 10px; font-size: 11px; text-decoration: none; }
+@media (max-width: 760px) { .room-analysis { inset: 56px 8px 46px 8px; } }
+
+/* Tools shown while the Mac LiDAR mapper is the source */
+.mapper-tools { display: flex; align-items: center; gap: 10px; margin-top: 7px; font-size: 11px; }
+.mapper-tools button { padding: 4px 7px; font-size: 11px; }
+.mapper-tools a { color: var(--blue); }
+.sonar-readout { margin: 6px 0 0; padding: 5px 7px; font: 11px/1.4 var(--mono); color: #c5d3dc; border: 1px solid #273542; border-radius: 3px; }
+.sonar-readout[data-blind] { color: #ffd9fa; border-color: #ff40e6; background: #ff40e61f; }

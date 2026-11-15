@@ -165,3 +165,4 @@ def encode_sonar_frame(frame: Any, sequence: int, detections_document: Any = Non
         points = points.tolist()
     return encode_frame(points=points, timestamp=frame.timestamp, meta=frame.meta,
                         sequence=sequence, detections=detections_document, replay=replay)
+

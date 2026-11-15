@@ -5,15 +5,19 @@
 !/pyproject.toml
 !/README.md
 !/PROTOCOL.md
+!/LIDAR_PROTOCOL.md
 !/smoke_test.py
+!/fake_phone.py
 !/sonar_bridge/
 !/sonar_bridge/__init__.py
 !/sonar_bridge/__main__.py
 !/sonar_bridge/protocol.py
+!/sonar_bridge/lidar.py
 !/sonar_bridge/server.py
 !/sonar_bridge/sources.py
 !/tests/
 !/tests/test_protocol.py
+!/tests/test_lidar.py
 !/tests/test_server.py
 !/tests/test_sources.py
 
@@ -67,3 +71,19 @@ credentials/
 *.crt
 id_rsa*
 id_ed25519*
+
+# Scoped independent range ingestion/integration.
+!/sonar_bridge/range_protocol.py
+!/sonar_bridge/range_processing.py
+!/sonar_bridge/range_recording.py
+!/sonar_bridge/range_adapter.py
+!/sonar_bridge/range_server.py
+!/tests/test_range_protocol.py
+!/tests/test_range_processing.py
+!/tests/test_range_adapter.py
+!/tests/test_range_server.py
+!/range_smoke_test.py
+!/range_readout.py
+
+!/fixtures/
+!/fixtures/range-synthetic.txt

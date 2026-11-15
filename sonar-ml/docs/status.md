@@ -2,6 +2,15 @@
 
 _Last updated 2026-11-14 (session 6: Databricks pipeline, branch `databricks-pipeline`). Update this file whenever something starts or stops working._
 
+## Sensor change (2026-11-14, evening)
+
+The sonar hardware is no longer available for MadHacks. The project is now
+ECHO RESCUE: an iPhone LiDAR app ([`ios-lidar/`](../../ios-lidar/README.md))
+publishes ARKit world-space points over a separate `lidar_frame` v1 transport
+([protocol](../../websocket-bridge/LIDAR_PROTOCOL.md)). LiDAR data does not use
+`SonarFrame`, this package's forward/left/up frame, or its classifier. Nothing
+in `sonar-ml/` changed; it still runs on simulated sonar only.
+
 ## Summary
 
 > **Pivot (2026-11-14, session 7):** no ultrasonic sensor could be sourced. The
