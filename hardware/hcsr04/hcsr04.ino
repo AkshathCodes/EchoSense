@@ -6,7 +6,12 @@
 // the bridge's range adapter in "meters-line" mode.
 //
 // Wiring and how the sensor works: README.md in this folder.
-// Not yet run on hardware.
+// Compiled and flashed on a XIAO nRF52840 Sense (Seeeduino:nrf52 1.1.13); serial output read back on Windows.
+
+// Seeed's nRF52 core (Adafruit-based) only links Serial when the sketch includes TinyUSB.
+#if defined(ARDUINO_ARCH_NRF52) && defined(USE_TINYUSB)
+#include <Adafruit_TinyUSB.h>
+#endif
 
 // The same sketch runs on a Seeed Studio XIAO, an ESP32 dev board and a 5 V
 // Arduino. Pins differ per board.
@@ -17,7 +22,8 @@
 
 #if defined(SEEED_XIAO) || defined(ARDUINO_XIAO_ESP32C3) || defined(ARDUINO_XIAO_ESP32S3) || \
     defined(ARDUINO_XIAO_ESP32C6) || defined(ARDUINO_SEEED_XIAO_RP2040) || \
-    defined(ARDUINO_SEEED_XIAO_M0) || defined(ARDUINO_Seeed_XIAO_nRF52840)
+    defined(ARDUINO_SEEED_XIAO_M0) || defined(ARDUINO_Seeed_XIAO_nRF52840) || \
+    defined(ARDUINO_Seeed_XIAO_nRF52840_Sense)
 // XIAO pads D6 (Trig) and D5 (Echo): the two pads nearest the sensor when it
 // sits below the XIAO on the perfboard, so no long wires are needed.
 // XIAO pins are 3.3 V, so ECHO needs the 1k / 2k divider.
