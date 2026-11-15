@@ -1,0 +1,26 @@
+{
+  "baseline-s0.joblib": {
+    "bytes": 11728697,
+    "sha256": "b04e9d5a1478ee5b8896c7ae91c68fa43062ce5fccaf93809b4ec8227c1926f3"
+  },
+  "baseline-s1.joblib": {
+    "bytes": 11838009,
+    "sha256": "7f172a8b564ad23847dbbca0aae1454d1991109d01a0c120fe217a59dff46ebe"
+  },
+  "baseline-s2.joblib": {
+    "bytes": 11783353,
+    "sha256": "4655e65c50b2b415a1afcdb596dabee324cc6d11a23c30ac11c5a226dec43fe0"
+  },
+  "candidate-s0.joblib": {
+    "bytes": 12643017,
+    "sha256": "0e8e70afeded8359e92ef679332bd128e73436c032949c35618180e3c8c4d425"
+  },
+  "candidate-s1.joblib": {
+    "bytes": 12626665,
+    "sha256": "c5765a87469b1dca9668a494315c72a3f577cad58fae01971a995e2cbd073fda"
+  },
+  "candidate-s2.joblib": {
+    "bytes": 12664073,
+    "sha256": "aa2416e20093a5632cba72b650af75256e6bced1eb8ea182fdffce3c1692dde6"
+  }
+}

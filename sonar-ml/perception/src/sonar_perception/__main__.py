@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--seed", type=int, default=0)
     g.add_argument("--env", default="random", help="random | clear | fog | warm | heavy | extreme (held out)")
     g.add_argument("--no-frames", action="store_true", help="skip saving per-scene SonarFrames")
+    g.add_argument("--diversity", choices=["off", "train", "challenge"], default="off",
+                   help="opt-in uncalibrated acquisition diversity; defaults preserve existing data")
     _add_sensing(g)
 
     b = sub.add_parser("baseline", help="random forest on cluster features (no torch)")
@@ -103,7 +105,9 @@ def main(argv: list[str] | None = None) -> None:
         from .dataset import generate
 
         sensor, sweep = _sensing(a)
-        m = generate(a.out, a.scenes, seed=a.seed, env_mode=a.env, save_frames=not a.no_frames, sensor=sensor, sweep=sweep)
+        from .augmentation import AcquisitionDiversity
+        diversity = None if a.diversity == "off" else AcquisitionDiversity.challenge() if a.diversity == "challenge" else AcquisitionDiversity()
+        m = generate(a.out, a.scenes, seed=a.seed, env_mode=a.env, save_frames=not a.no_frames, sensor=sensor, sweep=sweep, diversity=diversity)
         print(json.dumps({k: m[k] for k in ("n_scenes", "n_clusters", "class_counts", "mean_purity")}, indent=2))
     elif a.cmd == "baseline":
         from .baseline import run_baseline

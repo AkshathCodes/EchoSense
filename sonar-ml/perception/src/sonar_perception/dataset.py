@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from . import __version__
+from .augmentation import AcquisitionDiversity, diversify, thin_detections
 from .config import EnvironmentConfig, SensorConfig, SimConfig, SweepConfig
 from .features import FEATURE_NAMES, cluster_features
 from .segmentation import extract_clusters
@@ -32,6 +33,7 @@ def generate(
     seg_mode: str = "spherical",
     threshold_jitter: bool = True,
     sweep: SweepConfig | None = None,
+    diversity: AcquisitionDiversity | None = None,
 ) -> dict:
     """Simulate `n_scenes` frames, cluster them, and write a cluster dataset.
 
@@ -49,6 +51,7 @@ def generate(
     out = Path(out_dir)
     (out / "scenes").mkdir(parents=True, exist_ok=True)
     pts, feats, labels, scene_ids, purity, envs = [], [], [], [], [], []
+    applied, empty = 0, 0
     for i in range(n_scenes):
         rng = np.random.default_rng([seed, i])
         env = EnvironmentConfig.random(rng) if env_mode == "random" else EnvironmentConfig.preset(env_mode)
@@ -58,7 +61,17 @@ def generate(
                 sensor, point_threshold_db=float(rng.uniform(-55, -45)), noise_margin_db=float(rng.uniform(10, 18))
             )
         scene = random_scene(rng, sim, sensor)
+        acquisition_rng = np.random.default_rng([seed, i, 739391])
+        keep, details = 1.0, None
+        if diversity is not None:
+            scene, scene_sensor, keep, details = diversify(scene, scene_sensor, diversity, acquisition_rng)
+            applied += int(details["applied"])
         frame = simulate_sweep(scene, scene_sensor, env, sim, sweep, rng, timestamp=float(i), scene_id=i)
+        if details is not None:
+            if details["applied"]:
+                frame = thin_detections(frame, keep, acquisition_rng)
+            frame.meta["acquisition_diversity"] = details
+        empty += int(len(frame.points) == 0)
         if save_frames:
             frame.save(out / "scenes" / f"scene_{i:05d}.npz")
         clusters, _ = extract_clusters(frame, eps=eps, min_samples=min_samples, mode=seg_mode)
@@ -94,6 +107,10 @@ def generate(
         "threshold_jitter": threshold_jitter,
         "sweep": asdict(sweep),
         "sim": asdict(sim),
+        "source": "synthetic",
+        "diversity": asdict(diversity) if diversity is not None else None,
+        "diversified_scenes": applied,
+        "empty_scenes": empty,
         "n_clusters": int(len(labels_arr)),
         "class_counts": {CLASSES[k]: int((labels_arr == k).sum()) for k in CLASSES},
         "mean_purity": float(np.mean(purity)) if purity else None,

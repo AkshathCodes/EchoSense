@@ -1,5 +1,16 @@
 # Status
 
+## Local backend model sprint (2026-11-15)
+
+Controlled acquisition-diversity experiment completed on an isolated branch.
+**RETAIN BASELINE:** standard macro-F1 .8222 -> .7666, challenge .5929 -> .6925
+(mean of three forest seeds; synthetic only). The forest is not used by live
+Room analysis. No production weights or team UI/hardware/LiDAR files changed.
+[Measured report and reproduction](reports/model-sprint-20261115/report.md);
+[sonar contract](reports/SONAR_COMPATIBILITY_20261115.md). Historical results below
+are preserved and are not the scores of this new experiment.
+
+
 _Last updated 2026-11-14 (session 6: Databricks pipeline, branch `databricks-pipeline`). Update this file whenever something starts or stops working._
 
 ## Sensor change (2026-11-14, evening)
