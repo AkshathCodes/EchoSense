@@ -205,3 +205,23 @@ dialog form > div { display: flex; justify-content: flex-end; gap: 7px; }
   .source { font-size: 10px; padding-inline: 2px; }
   .instrument { width: 164px; }
 }
+
+/* LiDAR spatial memory panel */
+.lidar-panel canvas { position: static; height: auto; cursor: default; width: 100%; margin: 6px 0 4px; border: 1px solid #273542; border-radius: 3px; }
+.lidar-panel .coverage-key, .lidar-panel .caveat { margin: 3px 0 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+.lidar-panel .coverage-key i { display: inline-block; width: 8px; height: 8px; margin: 0 3px 0 6px; border: 1px solid #365065; }
+.lidar-panel .coverage-key i:first-child { margin-left: 0; }
+.lidar-panel .surface { background: #63d6f2; }
+.lidar-panel .seen { background: #1d4a5c; }
+.lidar-panel .unknown { background: #070d13; }
+.lidar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; font-size: 11px; }
+.lidar-actions button, .lidar-actions label { white-space: nowrap; }
+.lidar-actions button { padding: 4px 7px; font-size: 11px; }
+
+/* Room analysis overlay */
+.room-analysis { position: absolute; inset: 56px 262px 46px 20px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #080d13f5; border: 1px solid #365065; border-radius: 6px; }
+.room-analysis canvas { position: static; flex: 1; min-height: 0; width: 100%; height: auto; object-fit: contain; cursor: default; }
+.room-analysis-bar { display: flex; align-items: center; gap: 10px; font: 11px var(--mono); color: #a9bfd0; }
+.room-analysis-bar span { flex: 1; }
+.room-analysis-bar a, .room-analysis-bar button { padding: 5px 10px; font-size: 11px; text-decoration: none; }
+@media (max-width: 760px) { .room-analysis { inset: 56px 8px 46px 8px; } }

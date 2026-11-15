@@ -1,6 +1,6 @@
 import Foundation
 
-/// Pushes frames to the laptop bridge at ws://<host>:8765/ingest.
+/// Pushes frames to the laptop bridge at ws://<host>:8765/lidar/publish.
 /// Sends at most one message at a time and drops frames while one is in flight,
 /// so a slow network shows up as a lower frame rate instead of a growing backlog.
 final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegate {
@@ -27,7 +27,7 @@ final class BridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegat
         guard !trimmed.isEmpty else { return nil }
         if trimmed.hasPrefix("ws://") || trimmed.hasPrefix("wss://") { return URL(string: trimmed) }
         let host = trimmed.contains(":") ? trimmed : trimmed + ":8765"
-        return URL(string: "ws://" + host + "/ingest")
+        return URL(string: "ws://" + host + "/lidar/publish")
     }
 
     func connect(to entry: String) {

@@ -4,6 +4,26 @@ Proposed integration transport for Rishi's sonar data and Akshath's existing
 frontend. No frontend, model, hardware interface, or old spatial package is
 included or imported. See PROTOCOL.md before connecting the frontend.
 
+## LiDAR mode
+
+Real iPhone LiDAR uses its own endpoints and message format, kept apart from
+the sonar path. Full contract: [LIDAR_PROTOCOL.md](LIDAR_PROTOCOL.md).
+
+```powershell
+# live: phone publishes to /lidar/publish, browser reads /lidar/view
+.\.venv\Scripts\python.exe -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
+# replay a recording to /lidar/view at 3 frames a second
+.\.venv\Scripts\python.exe -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
+# no phone: SYNTHETIC publisher, labeled as such in every frame
+.\.venv\Scripts\python.exe -B fake_phone.py
+```
+
+On macOS or Linux the interpreter is `.venv/bin/python`. `--lidar` binds all
+interfaces so the phone can connect and prints the address to enter in the
+app; use `--host` to bind one address. No TLS, no authentication.
+`sonar_bridge/lidar.py` holds validation, the hub, recording and replay;
+`tests/test_lidar.py` covers them.
+
 ## Windows PowerShell setup and launch
 
 ```powershell

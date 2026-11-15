@@ -5,18 +5,19 @@
 !/pyproject.toml
 !/README.md
 !/PROTOCOL.md
+!/LIDAR_PROTOCOL.md
 !/smoke_test.py
 !/fake_phone.py
 !/sonar_bridge/
 !/sonar_bridge/__init__.py
 !/sonar_bridge/__main__.py
 !/sonar_bridge/protocol.py
-!/sonar_bridge/relay.py
+!/sonar_bridge/lidar.py
 !/sonar_bridge/server.py
 !/sonar_bridge/sources.py
 !/tests/
 !/tests/test_protocol.py
-!/tests/test_relay.py
+!/tests/test_lidar.py
 !/tests/test_server.py
 !/tests/test_sources.py
 

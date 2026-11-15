@@ -1,13 +1,28 @@
 # EchoSense
 
-EchoSense maps a room you cannot see. An iPhone's LiDAR scanner is the live
-sensor and this interactive viewer shows the scan. The UI
-starts with **Mock data**, a modeled living room and simulated sensor readings.
+ECHO RESCUE is a spatial memory system for simulated search-and-rescue
+planning. An operator scans an unfamiliar indoor space with an iPhone Pro's
+LiDAR. ECHO keeps what was observed, records where the scanner went, and shows
+which areas have no measurement.
 
-> **Sensor change (Nov 14):** the sonar hardware is no longer available. The
-> live sensor is now an iPhone's LiDAR scanner. See
-> [iPhone LiDAR](#iphone-lidar-live-sensor). The sonar simulation, ML and
-> acoustic scanner remain in the repo and still run on simulated data.
+It does not see through walls, detect people behind obstacles, or make a
+phone an operational firefighting device. Unobserved never means safe.
+
+```
+iPhone Pro LiDAR -> ARKit app (ios-lidar/) -> Wi-Fi -> Python bridge (websocket-bridge/)
+  -> 3D viewer (src/) -> spatial memory, coverage map, audio cues
+```
+
+| Area | Owner |
+|---|---|
+| `ios-lidar/` iPhone app | Rishi |
+| `websocket-bridge/` bridge, [LiDAR protocol](websocket-bridge/LIDAR_PROTOCOL.md), record and replay | Charvik |
+| `src/`, `index.html` viewer and LiDAR rendering | Akshath |
+| `src/spatial-memory.js`, `src/audio-cues.js`, [demo plan](docs/DEMO.md) | Ryan |
+
+The UI starts with **Mock data**, a modeled living room. The earlier sonar
+simulation, ML and acoustic scanner are still in the repo and still run on
+simulated data only.
 
 ## Run locally
 
@@ -85,32 +100,65 @@ modeled from visible silhouettes and relationships, with rounded cushions,
 shelves, individual books, and a lamp. Front and left walls are open for the
 cutaway. The wireframe and points are generated from surfaces at startup.
 
-## iPhone LiDAR (live sensor)
-
-`ios/` holds a SwiftUI app that reads the iPhone LiDAR depth map and pushes
-points to the bridge, which relays them to this viewer.
-
-```
-iPhone app  --ws /ingest-->  websocket-bridge --lidar  --ws /ws-->  viewer
-```
+## LiDAR spatial memory
 
 ```sh
 node serve.js
 cd websocket-bridge
 python -m venv .venv && .venv/bin/pip install -e .
-.venv/bin/python -B -m sonar_bridge --lidar --origin http://127.0.0.1:4173
+.venv/bin/python -B -m sonar_bridge --lidar --record session.jsonl --origin http://127.0.0.1:4173
 ```
 
-Build the app from `ios/EchoSenseLiDAR.xcodeproj`, enter the address the
-bridge prints, then click **Connect** in the viewer. The source badge reads
-**Live LiDAR**. The study line reads "Phone-relative scan" in Live mode and
-"Room map" when the phone sends its accumulated map. The signal readout shows
-mean ARKit depth confidence. Build steps, the two modes, and what does and
-does not work in a dark room are in [ios/README.md](ios/README.md). To drive
-the viewer without a phone, run `python -B fake_phone.py` in
-`websocket-bridge/`.
+Open `http://127.0.0.1:4173/` and click **Connect** (the address defaults to
+`ws://127.0.0.1:8765/lidar/view`). Then publish frames from the phone
+([ios-lidar/README.md](ios-lidar/README.md)) or, with no phone, from the
+labeled synthetic publisher: `python -B fake_phone.py` in `websocket-bridge/`.
 
-The app has not been compiled yet; it was written on a machine without Xcode.
+What the viewer adds on top of the point cloud:
+
+- **Persistence.** Points are kept in a 5 cm voxel grid (`src/spatial-memory.js`),
+  capped at 120,000 cells, so geometry stays after the scanner turns away.
+- **Scanner path.** The orange trail and marker are the scanner's own
+  recorded positions.
+- **Coverage map.** A plan view in 25 cm cells: *Surface* (a return landed
+  there above floor level), *Seen through* (a sensor ray crossed it), and
+  *Not observed*. A cell counts as seen if one ray crossed it at any height,
+  which is weaker than "empty". Not observed means no measurement.
+- **Tracking honesty.** Frames sent while ARKit tracking is not normal are
+  counted and not stored. A new phone session clears the map instead of
+  merging two origins.
+- **Surface classes.** A geometric classifier (`src/room-classifier.js`) labels
+  every retained point as floor, wall, ceiling or object and colours the cloud
+  by class (the "Surface classes" render mode, on by default for LiDAR). It is
+  a set of rules on room geometry, not a trained network: floor and ceiling
+  are the busiest height layers at the bottom and top, a wall is a 10 cm
+  column filled over at least 1.2 m of height, and everything else is an
+  object. Tall cabinets and doors count as walls.
+- **Room analysis.** The button in the LiDAR panel draws a labelled floor plan
+  (`src/room-plan.js`): walls, floor seen, each object with a letter and its
+  height, the scanner path, a 1 m scale bar, and black for not observed.
+  **Download PNG** saves it. Objects are measured, not identified.
+- **Audio cues** (off by default): session started, tracking lost and
+  restored, phone connected and lost, snapshot saved, replay complete.
+- **Clear map** and **Pause** for the display, and **Save snapshot** as before.
+
+The source badge reads **Live LiDAR** only for `source: arkit_scene_depth`
+frames in live mode. Synthetic frames read **Simulated LiDAR**, and bridge
+replays read **LiDAR replay**.
+
+Replay a recorded session:
+
+```sh
+.venv/bin/python -B -m sonar_bridge --lidar-replay session.jsonl --origin http://127.0.0.1:4173
+```
+
+The classifier scores 92 to 100% per-class recall on a clean synthetic room
+with known labels (`test/room-classifier.test.js`). It has not been scored on
+real scans; expect it to do worse on partial, noisy ones.
+
+Not verified: the iPhone app has never been compiled, and no real LiDAR frame
+has passed through this pipeline. Everything above was exercised with
+synthetic frames only.
 
 ## Backend handoff
 
@@ -124,8 +172,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -B -m sonar_bridge --origin http://127.0.0.1:4173
 ```
 
-Open `http://127.0.0.1:4173/` and click **Connect**. The default address is
-`ws://127.0.0.1:8765/ws`. Match `--origin` to the exact frontend host and port
+Open `http://127.0.0.1:4173/`, set the address to `ws://127.0.0.1:8765/ws`, and click
+**Connect**. Match `--origin` to the exact frontend host and port
 if you use a different URL. The default bridge stream is a simulated 45-point
 wall with no model detections. For NPZ recordings with optional detection JSON,
 see [bridge setup and manifest format](websocket-bridge/README.md). On normal
@@ -217,7 +265,9 @@ cd perception && ../.venv/bin/python -m pytest
 node --test
 ```
 
-The tests cover preview payload conversion, malformed or oversized points,
+The tests cover LiDAR frame decoding, voxel filtering, coverage cells, room
+classification on a labeled synthetic room, audio cue
+rate limiting, preview payload conversion, malformed or oversized points,
 decoder injection and disconnect, replay sample selection, and cell-based
 change detection. For visual verification, load the page
 and switch between all three camera and render modes. Change the vertex cap

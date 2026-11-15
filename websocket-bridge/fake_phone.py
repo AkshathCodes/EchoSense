@@ -1,54 +1,83 @@
-"""Stand-in for the iPhone app: pushes a SYNTHETIC room sweep to /ingest.
+"""SYNTHETIC stand-in for the iPhone app. Not real LiDAR data.
 
-Use it to work on the viewer without a phone:
+Publishes lidar_frame v1 messages with source "synthetic": a scanner walking
+through a 5 x 4 m box room with a table and a crate. Use it to work on the bridge and viewer without
+the phone:
     python -B -m sonar_bridge --lidar --origin http://127.0.0.1:4173
     python -B fake_phone.py
-Frames are labeled live LiDAR by the bridge because that is what the ingest
-path carries. The sensor_id says FAKE so a saved map can be told apart.
 """
 import argparse
 import asyncio
 import json
 import math
+import random
+import uuid
 
 from websockets.asyncio.client import connect
 
-
-def sweep(heading: float) -> list[list[float]]:
-    """Points a phone at the middle of a 5 x 4 m room would see, 60 degree view."""
-    points = []
-    for column in range(-30, 31, 2):
-        angle = heading + math.radians(column)
-        dx, dy = math.cos(angle), math.sin(angle)
-        # Distance to the nearest wall of the box x in [-2.5, 2.5], y in [-2, 2].
-        reach = min((2.5 if dx > 0 else -2.5) / dx if dx else math.inf,
-                    (2.0 if dy > 0 else -2.0) / dy if dy else math.inf)
-        for row in range(-6, 7):
-            z = row * 0.15
-            # Rotate into the phone's own frame: X forward, Y left.
-            x, y = reach * math.cos(math.radians(column)), reach * math.sin(math.radians(column))
-            points.append([round(x, 2), round(y, 2), round(z, 2), 2])
-    return points
+ROOM_X, ROOM_Z, FLOOR, CEILING = 2.5, 2.0, -1.3, 1.2
+# Synthetic furniture as boxes: (x0, x1, y0, y1, z0, z1). A table and a low crate.
+BOXES = ((1.0, 2.0, FLOOR, FLOOR + 0.75, -0.3, 0.3), (-1.8, -1.3, FLOOR, FLOOR + 0.5, 1.0, 1.5))
 
 
-async def main(url: str, fps: float) -> None:
+def box_hit(origin, direction, box) -> float:
+    """Distance along the ray to the box, or infinity. Slab test."""
+    near, far = 0.0, math.inf
+    for o, d, lo, hi in zip(origin, direction, box[0::2], box[1::2]):
+        if abs(d) < 1e-9:
+            if not lo <= o <= hi:
+                return math.inf
+            continue
+        a, b = (lo - o) / d, (hi - o) / d
+        near, far = max(near, min(a, b)), min(far, max(a, b))
+    return near if near <= far and near > 0 else math.inf
+
+
+def frame(sequence: int, session: str, rng: random.Random) -> dict:
+    t = sequence / 3
+    # Camera walks a small loop and turns as it goes. ARKit world: +Y up, -Z ahead at start.
+    cx, cz = 0.8 * math.sin(t * 0.15), 0.6 * math.cos(t * 0.15) - 0.6
+    yaw = t * 0.25
+    points, confidences = [], []
+    for _ in range(900):
+        azimuth = yaw + rng.uniform(-0.5, 0.5)
+        pitch = rng.uniform(-0.6, 0.4)
+        dx, dy, dz = -math.sin(azimuth) * math.cos(pitch), math.sin(pitch), -math.cos(azimuth) * math.cos(pitch)
+        reach = min((ROOM_X - cx) / dx if dx > 0 else (-ROOM_X - cx) / dx if dx < 0 else math.inf,
+                    (ROOM_Z - cz) / dz if dz > 0 else (-ROOM_Z - cz) / dz if dz < 0 else math.inf,
+                    CEILING / dy if dy > 0 else FLOOR / dy if dy < 0 else math.inf)
+        reach = min(reach, *(box_hit((cx, 0.0, cz), (dx, dy, dz), box) for box in BOXES))
+        if reach > 5:
+            continue
+        points.append([round(cx + dx * reach, 3), round(dy * reach, 3), round(cz + dz * reach, 3)])
+        confidences.append(2)
+    cos, sin = math.cos(yaw), math.sin(yaw)
+    pose = [cos, 0, -sin, 0, 0, 1, 0, 0, sin, 0, cos, 0, round(cx, 3), 0, round(cz, 3), 1]
+    return {"type": "lidar_frame", "schema_version": 1, "session_id": session, "device_id": "SYNTHETIC-fake-phone",
+            "sequence": sequence, "timestamp": round(t, 3), "source": "synthetic",
+            "coordinate_frame": "arkit_world", "units": "meters", "tracking": "normal",
+            "camera_to_world": pose, "points": points, "confidences": confidences}
+
+
+async def main(url: str, fps: float, count: int | None) -> None:
+    rng = random.Random(7)
+    # A fresh id each run, as the real app does: the bridge refuses to merge runs.
+    session = "synthetic-" + uuid.uuid4().hex[:12]
     async with connect(url, proxy=None, max_size=None) as phone:
-        frame = 0
-        while True:
-            await phone.send(json.dumps({
-                "type": "lidar_frame", "version": "0.1", "timestamp": frame / fps,
-                "sensor_id": "FAKE-phone-sweep", "tracking": "normal", "reference": "sensor",
-                "points": sweep(frame / fps * 0.4)}))
-            frame += 1
+        sequence = 0
+        while count is None or sequence < count:
+            await phone.send(json.dumps(frame(sequence, session, rng)))
+            sequence += 1
             await asyncio.sleep(1 / fps)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="ws://127.0.0.1:8765/ingest")
-    parser.add_argument("--fps", type=float, default=8.0)
+    parser.add_argument("--url", default="ws://127.0.0.1:8765/lidar/publish")
+    parser.add_argument("--fps", type=float, default=3.0)
+    parser.add_argument("--frames", type=int, help="stop after this many frames")
     arguments = parser.parse_args()
     try:
-        asyncio.run(main(arguments.url, arguments.fps))
+        asyncio.run(main(arguments.url, arguments.fps, arguments.frames))
     except KeyboardInterrupt:
         pass
