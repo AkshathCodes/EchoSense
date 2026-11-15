@@ -20,8 +20,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .geometry import (CAM_TO_DEVICE, arkit_pose_to_world, backproject, remove_edge_pixels, rotation_angle_deg,
-                       world_from_device)
+from .geometry import (CAM_TO_DEVICE, arkit_pose_to_world, backproject, remove_edge_pixels, remove_grazing_pixels,
+                       rotation_angle_deg, world_from_device)
 from .icp import estimate_normals, icp_point_to_plane, voxel_downsample
 from .protocol import DepthFrame
 
@@ -42,6 +42,8 @@ class VoxelMap:
         self.keys = np.zeros(0, np.int64)
         self.sums = np.zeros((0, 3))
         self.counts = np.zeros(0, np.int64)
+        self.misses = np.zeros(0, np.int64)  # times a depth ray passed through this voxel (free space)
+        self.carving = False  # set by Mapper; when on, points() drops voxels seen through more than hit
 
     def __len__(self) -> int:
         return len(self.counts)
@@ -67,9 +69,33 @@ class VoxelMap:
             self.keys = keys[order]
             self.sums = np.concatenate([self.sums, s[new]])[order]
             self.counts = np.concatenate([self.counts, c[new]])[order]
+            self.misses = np.concatenate([self.misses, np.zeros(int(new.sum()), np.int64)])[order]
+
+    def carve(self, origin: np.ndarray, ends: np.ndarray, stop_before: float = 0.08, start: float = 0.25) -> None:
+        """Free-space carving: every voxel a ray crosses before its hit is evidence of empty space."""
+        if len(ends) == 0 or len(self.keys) == 0:
+            return
+        d = ends - origin
+        L = np.linalg.norm(d, axis=1)
+        ok = L > start + stop_before
+        d, L = d[ok] / L[ok, None], L[ok]
+        steps = np.arange(start, L.max() - stop_before, self.voxel)
+        if len(steps) == 0:
+            return
+        pts = origin + d[:, None, :] * steps[None, :, None]  # [rays, steps, 3]
+        valid = steps[None, :] < (L - stop_before)[:, None]
+        k = _pack(np.floor(pts[valid] / self.voxel).astype(np.int64))
+        k = np.unique(k)  # count each voxel at most once per frame
+        pos = np.searchsorted(self.keys, k)
+        pos = np.minimum(pos, len(self.keys) - 1)
+        hit = self.keys[pos] == k
+        self.misses[pos[hit]] += 1
 
     def points(self, min_count: int = 1) -> tuple[np.ndarray, np.ndarray]:
         m = self.counts >= min_count
+        if self.carving:
+            # occupancy: keep voxels hit more often than they were seen through (free space)
+            m &= self.misses <= self.counts
         return self.sums[m] / self.counts[m, None], self.counts[m]
 
     def sample(self, n: int, min_count: int = 2, rng: np.random.Generator | None = None) -> tuple[np.ndarray, np.ndarray]:
@@ -78,6 +104,25 @@ class VoxelMap:
             idx = (rng or np.random.default_rng(0)).choice(len(p), n, replace=False)
             p, c = p[idx], c[idx]
         return p, c
+
+
+def _tilt_error_deg(R: np.ndarray, R_ref: np.ndarray) -> float:
+    """Angle between where R and R_ref say "world up" points in the camera frame (roll/pitch only)."""
+    up = np.array([0.0, 0.0, 1.0])
+    a, b = R.T @ up, R_ref.T @ up
+    return float(np.degrees(np.arccos(np.clip(a @ b, -1, 1))))
+
+
+def _match_tilt(R: np.ndarray, R_ref: np.ndarray) -> np.ndarray:
+    """R with its roll/pitch replaced by R_ref's (keeps R's heading). Both world <- camera."""
+    up = np.array([0.0, 0.0, 1.0])
+    a, b = R.T @ up, R_ref.T @ up  # world-up in camera coords, per rotation
+    v, c = np.cross(a, b), float(a @ b)
+    if np.linalg.norm(v) < 1e-9:
+        return R
+    vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    Q = np.eye(3) + vx + vx @ vx / (1 + c)  # camera-frame rotation taking a -> b
+    return R @ Q.T
 
 
 def build_target(points: np.ndarray, voxel: float, max_points: int, rng: np.random.Generator):
@@ -159,7 +204,10 @@ class Mapper:
                  target_every: int = 3, max_source: int = 3000,
                  rot_prior_weight: float = 0.02, max_imu_disagreement_deg: float = 10.0,
                  max_rmse: float = 0.04, min_inlier_frac: float = 0.2, min_init_points: int = 3000,
-                 min_matches: int = 300, map_max_range: float = 3.5, edge_filter: float | None = 0.05) -> None:
+                 min_matches: int = 300, map_max_range: float = 3.5, edge_filter: float | None = 0.05,
+                 tilt_prior_weight: float = 5.0, integrate_max_rmse: float | None = None,
+                 integrate_max_tilt_deg: float | None = None, grazing_min_cos: float | None = 0.25,
+                 carve_rays: int = 2000, carve_every: int = 2) -> None:
         if pose_source not in ("imu_icp", "arkit"):
             raise ValueError(pose_source)
         self.map = VoxelMap(voxel)
@@ -185,6 +233,13 @@ class Mapper:
         self._tgt_center = np.zeros(3)
         self.min_matches = min_matches
         self.map_max_range, self.edge_filter = map_max_range, edge_filter
+        # tilt held to gravity in ICP; frames whose fit or tilt is worse than these are tracked but not mapped
+        self.tilt_prior_weight = tilt_prior_weight
+        self.integrate_max_rmse, self.integrate_max_tilt_deg = integrate_max_rmse, integrate_max_tilt_deg
+        self.skipped_integrations = 0
+        self.grazing_min_cos, self.carve_rays, self.carve_every = grazing_min_cos, carve_rays, carve_every
+        self._integrations = 0
+        self.map.carving = carve_rays > 0
         self._map_pts = None  # points of the current frame that go into the map
         self.last_seq = -1
         self.need_reloc = False
@@ -231,6 +286,8 @@ class Mapper:
         # The map gets a cleaner subset: no edge "flying pixels", and only the precise short range.
         # Tracking (ICP) keeps the full range, which gives it more geometry to lock onto.
         clean = remove_edge_pixels(f.depth, self.edge_filter) if self.edge_filter else f.depth
+        if self.grazing_min_cos:
+            clean = remove_grazing_pixels(clean, f.K, self.grazing_min_cos)
         self._map_pts = backproject(clean, f.K, f.confidence, self.min_conf, max_range=self.map_max_range,
                                     stride=self.stride)
         R_wd, gerr = world_from_device(f.attitude, f.gravity)
@@ -302,8 +359,13 @@ class Mapper:
         if target is None or len(src) < 100:
             return self._lost(f, R_guess, len(pts), gerr)
         tgt, tgt_n, tree = target
+        # roll/pitch prior: the IMU's absolute tilt (gravity), not the propagated guess
+        R_prior = R_guess
+        if self.tilt_prior_weight > 0:
+            R_prior = _match_tilt(R_guess, R_imu)
         res = icp_point_to_plane(src, tgt, tgt_n, tree, R_guess, t_guess,
-                                 rot_prior=R_guess, rot_prior_weight=self.rot_prior_weight)
+                                 rot_prior=R_prior, rot_prior_weight=self.rot_prior_weight,
+                                 tilt_prior_weight=self.tilt_prior_weight)
         disagree = rotation_angle_deg(res.R @ R_guess.T)
         ok = (res.inlier_frac >= self.min_inlier_frac and res.inlier_frac * len(src) >= self.min_matches
               and res.rmse <= self.max_rmse and disagree <= self.max_imu_disagreement_deg)
@@ -313,7 +375,12 @@ class Mapper:
             return r
         self.lost_streak = 0
         self.reloc_attempts = 0
-        self._accept(res.R, res.t, pts, dt)
+        tilt_err = _tilt_error_deg(res.R, R_imu)
+        integrate = ((self.integrate_max_rmse is None or res.rmse <= self.integrate_max_rmse)
+                     and (self.integrate_max_tilt_deg is None or tilt_err <= self.integrate_max_tilt_deg))
+        if not integrate:
+            self.skipped_integrations += 1
+        self._accept(res.R, res.t, pts, dt, integrate=integrate)
         status = "tracking"
         self._frames_since_merge_try += 1
         if self.segments and self._frames_since_merge_try >= self.merge_every:
@@ -351,7 +418,9 @@ class Mapper:
         """Relocalization keeps failing (new area or long gap): set the current map aside, start fresh."""
         if len(self.map) >= self.min_map_voxels:
             self.segments.append(Segment(self.map, self.trajectory))
+        carving = self.map.carving
         self.map = VoxelMap(self.map.voxel)
+        self.map.carving = carving
         self.trajectory = []
         self.R, self.t, self.v, self.prev_imu = None, np.zeros(3), np.zeros(3), None
         self._tgt, self._reloc_tgt, self._reloc_tgt_size = None, None, 0
@@ -389,20 +458,28 @@ class Mapper:
         return False
 
     def reset(self) -> None:
+        carving = self.map.carving
         self.map = VoxelMap(self.map.voxel)
+        self.map.carving = carving
         self.trajectory = []
         self.R, self.t, self.v, self.prev_imu = None, np.zeros(3), np.zeros(3), None
         self._tgt, self._tgt_age = None, 0
         self.lost_streak = 0
         self.resets += 1
 
-    def _accept(self, R, t, pts, dt) -> None:
+    def _accept(self, R, t, pts, dt, integrate: bool = True) -> None:
         if dt > 0:
             self.v = 0.5 * self.v + 0.5 * (t - self.t) / dt
         self.R, self.t = R, t
         self.trajectory.append(t.copy())
-        mp = self._map_pts if self._map_pts is not None else pts
-        self.map.add(mp[::self.map_stride] @ R.T + t)
+        if integrate:
+            mp = self._map_pts if self._map_pts is not None else pts
+            world = mp[::self.map_stride] @ R.T + t
+            self.map.add(world)
+            self._integrations += 1
+            if self.carve_rays and len(world) and self._integrations % self.carve_every == 0:
+                n = min(self.carve_rays, len(world))
+                self.map.carve(t, world[self.rng.choice(len(world), n, replace=False)])
 
     def _lost(self, f, R_guess, n, gerr) -> FrameResult:
         self.lost_streak += 1

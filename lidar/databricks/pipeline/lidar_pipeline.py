@@ -81,6 +81,8 @@ def silver_lidar_sessions():
         F.col("j.stats.map_points").alias("map_points"), F.col("j.stats.unmerged_segments").alias("unmerged_segments"),
         F.col("j.stats.floor.floor_tilt_deg").alias("floor_tilt_deg"), F.col("j.stats.extent_m").alias("extent_m"),
         F.col("j.labels")["scene"].alias("scene"), "j.map_source",
+        # 'synthetic' = target inserted into a real empty-room scan (ADR-0018); filter on it for evaluation
+        F.coalesce(F.col("j.labels")["data_origin"], F.lit("real")).alias("data_origin"),
         F.coalesce(F.size("j.annotations"), F.lit(0)).alias("n_annotations"), "j.annotations",
         "ingested_at")
 
@@ -163,10 +165,11 @@ def gold_lidar_timeline():
 @dlt.expect("known_label", "label IN ('person', 'pet', 'furniture', 'clutter', 'door', 'other')")
 def silver_lidar_annotations():
     s = spark.readStream.table("silver_lidar_sessions").where("n_annotations > 0")  # noqa: F821
-    b = s.select("session_id", "lights", "room", "scene", F.posexplode("annotations").alias("box_id", "a"))
+    b = s.select("session_id", "lights", "room", "scene", "data_origin",
+                 F.posexplode("annotations").alias("box_id", "a"))
     return b.select(
         "session_id", "box_id", F.col("a.label").alias("label"), F.col("a.pose").alias("pose"),
-        F.col("a.note").alias("note"), "lights", "room", "scene",
+        F.col("a.note").alias("note"), "lights", "room", "scene", "data_origin",
         F.col("a.min")[0].alias("x_min"), F.col("a.min")[1].alias("y_min"), F.col("a.min")[2].alias("z_min"),
         F.col("a.max")[0].alias("x_max"), F.col("a.max")[1].alias("y_max"), F.col("a.max")[2].alias("z_max"))
 
@@ -180,7 +183,8 @@ def gold_lidar_labeled_points():
             & F.col("p.y").between(F.col("b.y_min"), F.col("b.y_max"))
             & F.col("p.z").between(F.col("b.z_min"), F.col("b.z_max")))
     return pts.join(box, cond).select(
-        "p.session_id", "b.box_id", "b.label", "b.pose", "b.lights", "b.scene", "p.x", "p.y", "p.z", "p.hits")
+        "p.session_id", "b.box_id", "b.label", "b.pose", "b.lights", "b.scene", "b.data_origin",
+        "p.x", "p.y", "p.z", "p.hits")
 
 
 @dlt.table(comment="One row per labelled box: size and how many map points support it.")
