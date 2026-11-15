@@ -23,17 +23,48 @@ const LIVE_COLOR = [1, 0.36, 0.25], SONAR_COLOR = [1, 0.25, 0.9];
 const sonarStates = ['no_sonar', 'agree', 'sonar_closer', 'lidar_no_return', 'sonar_farther'];
 const meters = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
 
+/** Delivery is distinct from original acquisition; recorded acquisition means unknown. */
+export function mapperLabel({ delivery, acquisition, simulated, stale = false, capture }) {
+  // Old saved maps may retain only `simulated`; false alone never proves real acquisition.
+  const origin = acquisition === 'simulated' || simulated === true ? 'Simulated LiDAR map'
+    : acquisition === 'live' ? 'LiDAR map' : 'LiDAR map / original acquisition unknown';
+  const phase = { stalled: ' / capture stalled', disconnected: ' / source disconnected', complete: ' / complete',
+    waiting: ' / waiting for depth' }[capture?.state] ?? '';
+  return `${stale ? 'Last map / historical / ' : ''}${origin}${delivery === 'recorded' ? ' / replay' : ''}${phase}`;
+}
+
+/** Optional additive metadata. Legacy/malformed freshness never proves active capture. */
+export function readCaptureStatus(raw) {
+  if (!raw || !['live', 'simulated', 'replay', 'unknown'].includes(raw.mode) ||
+      !['waiting', 'active', 'stalled', 'disconnected', 'complete'].includes(raw.state) ||
+      !(raw.age_s === null || typeof raw.age_s === 'number' && Number.isFinite(raw.age_s) && raw.age_s >= 0) ||
+      typeof raw.stall_after_s !== 'number' || !Number.isFinite(raw.stall_after_s) || raw.stall_after_s <= 0) return null;
+  // The mapper rounds age to milliseconds before sending it.
+  if (raw.state === 'active' && (raw.age_s === null || raw.age_s > raw.stall_after_s + 0.001)) return null;
+  return { mode: raw.mode, state: raw.state, age_s: raw.age_s, stall_after_s: raw.stall_after_s };
+}
+
+export function captureText(capture) {
+  if (!capture) return 'Capture freshness unavailable';
+  const mode = { live: 'Phone capture', simulated: 'Simulated capture', replay: 'Replay', unknown: 'Capture (origin unknown)' }[capture.mode];
+  const state = { active: 'receiving depth', waiting: 'waiting for depth', stalled: 'stalled',
+    disconnected: 'source disconnected', complete: 'complete' }[capture.state];
+  return `${mode}: ${state}${capture.age_s === null ? '' : ` / last depth ${capture.age_s.toFixed(1)} s ago`}`;
+}
+
 /** Reads `meta.sonar`. Returns null when no sonar is attached or the block is malformed. */
 export function readSonarStatus(raw) {
   if (!raw || typeof raw !== 'object' || !sonarStates.includes(raw.state)) return null;
   return { state: raw.state, range: meters(raw.range_m), lidarNear: meters(raw.lidar_near_m),
     lidarMedian: meters(raw.lidar_median_m), surfacePoints: Number.isSafeInteger(raw.surface_points) ? raw.surface_points : 0,
-    synthetic: raw.synthetic === true, blind: raw.state === 'sonar_closer' || raw.state === 'lidar_no_return' };
+    synthetic: raw.synthetic === true, acquisition: raw.acquisition_source,
+    blind: raw.state === 'sonar_closer' || raw.state === 'lidar_no_return' };
 }
 
 /** One line for the operator. Says plainly when the readings are simulated. */
 export function sonarText(sonar) {
-  const tag = sonar.synthetic ? 'Simulated sonar' : 'Sonar';
+  const tag = sonar.synthetic ? 'Simulated sonar'
+    : sonar.acquisition === 'recorded' ? 'Recorded sonar (original acquisition unknown)' : 'Sonar';
   const reading = sonar.range === null ? 'no echo' : `${sonar.range.toFixed(2)} m`;
   const lidar = sonar.lidarNear === null ? 'LiDAR no return' : `LiDAR ${sonar.lidarNear.toFixed(2)} m`;
   const verdict = { agree: 'agree', sonar_closer: 'surface LiDAR cannot see', lidar_no_return: 'surface LiDAR cannot see',
@@ -104,6 +135,10 @@ export function createMapperSession({ classify = analyseLidar } = {}) {
       let raw;
       try { raw = JSON.parse(payload); } catch { return undefined; }
       if (raw?.type !== 'sonar_frame' || raw.frame?.meta?.kind !== 'lidar_map') return undefined;
+      const modes = ['live', 'simulated', 'recorded'];
+      const acquisition = raw.acquisition_source ?? 'recorded', delivery = raw.source ?? 'recorded';
+      const capture = readCaptureStatus(raw.frame.meta.capture);
+      if (!modes.includes(delivery) || !modes.includes(acquisition)) throw new Error('Invalid mapper provenance');
       const rows = raw.frame.points;
       if (raw.protocol_version !== '0.1' || !Number.isSafeInteger(raw.sequence) || !Number.isFinite(raw.timestamp) ||
           !Array.isArray(rows) || rows.length > MAPPER_MAX_POINTS) throw new Error('Invalid mapper frame');
@@ -123,7 +158,7 @@ export function createMapperSession({ classify = analyseLidar } = {}) {
         if (strength < 100) { hits[i] = strength; hitSum += strength; }
       }
       const sonar = readSonarStatus(raw.frame.meta.sonar);
-      sonarSurface = points.subarray((mapCount + liveCount) * 3);
+      const surface = points.subarray((mapCount + liveCount) * 3);
       const map = points.subarray(0, mapCount * 3), mapHits = hits.subarray(0, mapCount);
       let result = cached;
       if (!sameMap(cached, map, mapHits)) {
@@ -155,12 +190,15 @@ export function createMapperSession({ classify = analyseLidar } = {}) {
       colors.set(result.colors);
       for (let i = mapCount; i < rows.length; i++) colors.set(i < mapCount + liveCount ? LIVE_COLOR : SONAR_COLOR, i * 3);
       const report = result.report;
-      const acquisition = raw.acquisition_source ?? 'live', delivery = raw.source ?? 'live';
+      // Publish the overlay only for an accepted frame, never one skipped during inference.
+      sonarSurface = surface;
       return { points, colors, hits, frame: raw.sequence, captureTime: raw.timestamp,
         snr: mapCount ? hitSum / mapCount : null,
         sonar: { delivery, acquisition, detectionCount: null },
         mapper: { mapPoints: mapCount, livePoints: liveCount, objects: report.objects.length,
-          simulated: acquisition === 'simulated', analysis: report, floorArea: report.floorArea, roomHeight: report.roomHeight, sonar } };
+          simulated: acquisition === 'simulated', analysis: report, floorArea: report.floorArea, roomHeight: report.roomHeight, sonar,
+          delivery, acquisition, capture, stale: Boolean(capture && capture.state !== 'active' && rows.length),
+          sonarSurface: surface } };
     },
   };
 }

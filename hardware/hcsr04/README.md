@@ -1,7 +1,9 @@
 # HC-SR04 sonar on the phone
 
-Owner: Ryan. **Nothing here has been run on hardware yet.** The software side
-is tested with simulated readings only.
+Owner: Ryan. **Bench tested on Windows with the HC-SR04 and XIAO nRF52840
+Sense, using D6 for TRIG and a voltage divider from ECHO to D5.** The mapper
+and bridge accepted live serial readings; the mapper's LiDAR input was
+synthetic. Combined operation with a real iPhone and alignment are untested.
 
 The HC-SR04 is strapped to the iPhone, pointing the same way as the LiDAR, and
 wired to a microcontroller that sends each distance to the Mac over USB. The

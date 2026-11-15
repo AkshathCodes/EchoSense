@@ -45,13 +45,17 @@ scans, and PNG exports use the predictions for that map, with footprints,
 class totals, and separate ceiling and uncertain-return layers. The viewer
 uses the geometric classifier if trained inference fails. The weights were
 trained on synthetic scans and have not been validated on real mapper data.
+If the phone stops sending depth or the mapper disconnects, the viewer keeps
+the last observed map as historical and marks current sonar readings unavailable.
 
 With an HC-SR04 strapped to the phone ([guide](hardware/hcsr04/README.md)),
 `SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper` adds a sonar
 cross-check: the viewer shows the sonar and LiDAR distances side by side and
 marks, in magenta, surfaces only the sonar can detect, such as glass.
 `SONAR_SIM=1 scripts/run-lidar.sh --mapper-sim` shows it with simulated
-readings. Not yet run on hardware.
+readings. The HC-SR04 and XIAO nRF52840 Sense passed a Windows serial bench
+test with a synthetic LiDAR publisher. Combined operation with a real iPhone
+and sensor alignment still need testing.
 
 With nothing running, `node serve.js` shows the viewer on built-in mock data.
 

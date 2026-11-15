@@ -29,6 +29,8 @@ def _common(p) -> None:
                    help="imu_icp = dark-safe (default); arkit = camera-based reference, lights on only")
     p.add_argument("--view", choices=["map", "frame", "both"], default="both")
     p.add_argument("--viewer-port", type=int, default=8765)
+    p.add_argument("--capture-stall-seconds", type=float, default=3.0,
+                   help="historical capture after this many seconds without successful depth ingestion (default 3)")
     p.add_argument("--viewer-points", type=int, default=20000,
                    help="points sent to the EchoSense viewer per update (default 20000; the viewer's "
                         "mapper adapter accepts up to 60000, the plain sonar decoder only 20000)")
@@ -94,7 +96,7 @@ def main(argv=None) -> None:
         return
 
     if a.cmd == "serve":
-        live = LiveMapper(_mapper(a), view=a.view, record=a.record)
+        live = LiveMapper(_mapper(a), view=a.view, record=a.record, capture_stall_s=a.capture_stall_seconds)
         if a.sonar_port:
             from .sonar import SerialSonar
             live.sonar = _sonar(a)
@@ -120,7 +122,9 @@ def main(argv=None) -> None:
         else:
             from .sim import stream
             messages = [protocol.encode(fr) for fr in stream(a.frames)]
-        live = LiveMapper(_mapper(a), view=a.view, verbose=False)
+        live = LiveMapper(_mapper(a), view=a.view, verbose=False,
+                          delivery="simulated" if a.cmd == "sim" else "recorded",
+                          capture_stall_s=a.capture_stall_seconds)
         sidecar = Path(a.file + ".sonar.jsonl") if a.cmd == "replay" else None
         if sidecar is not None and sidecar.exists():
             from .sonar import load_sidecar
@@ -192,6 +196,7 @@ async def _paced(live: LiveMapper, messages: list[bytes], viewer_port: int, fps:
             await asyncio.to_thread(live.ingest, msg)
             print(live.status_line(), flush=True)
             await asyncio.sleep(1 / fps)
+        live.finish_capture()
         print("[replay] done; still serving the final map")
         await asyncio.Future()
 
