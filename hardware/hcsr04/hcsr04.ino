@@ -8,8 +8,17 @@
 // Wiring and how the sensor works: README.md in this folder.
 // Not yet run on hardware.
 
+// The same sketch runs on an ESP32 and on a 5 V Arduino. Pins differ per board.
+#if defined(ESP32)
+// Classic ESP32 DevKit. ECHO must come through the 1k / 2k divider: the sensor
+// drives it at 5 V and ESP32 pins take 3.3 V at most.
+const uint8_t TRIG_PIN = 26;
+const uint8_t ECHO_PIN = 27;
+#else
+// Arduino Uno or Nano (5 V): wire ECHO straight to the pin.
 const uint8_t TRIG_PIN = 9;
 const uint8_t ECHO_PIN = 10;
+#endif
 
 // The sensor needs about 60 ms between pings for the last echo to die away.
 const unsigned long PING_INTERVAL_MS = 65;

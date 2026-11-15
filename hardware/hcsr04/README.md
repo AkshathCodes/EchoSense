@@ -36,9 +36,70 @@ is what the LiDAR cannot do, and why the two are worth combining.
 ## Parts
 
 - HC-SR04 module (4 pins: VCC, Trig, Echo, GND)
-- Arduino Uno or Nano (5 V board), USB cable to the Mac
-- 4 jumper wires, long enough to reach from the phone to the board (30 cm+)
-- For a 3.3 V board only: one 1 kΩ and one 2 kΩ resistor
+- ESP32 dev board (what the team has) or an Arduino Uno or Nano, with a USB
+  **data** cable to the Mac. Many micro-USB cables are charge-only.
+- Breadboard and jumper wires
+- 4 wires, 40 to 50 cm, from the sensor on the phone to the board
+- For the ESP32: one 1 kΩ and one 2 kΩ resistor (or the substitutes below)
+
+## ESP32 build, step by step
+
+The sketch uses **GPIO 26 for Trig and GPIO 27 for Echo** on an ESP32. Those
+are free on the classic 30- and 38-pin DevKit boards. On an S3, C3 or other
+variant pick any two free GPIOs and change the numbers at the top of the
+sketch.
+
+### 1. Breadboard first, no soldering
+
+1. Push the ESP32 into the breadboard across the center gap. If the board is
+   so wide that it covers every hole on one side, use two breadboards side by
+   side or female-to-male jumpers straight onto its pins.
+2. Sensor **VCC** to the ESP32 pin marked **5V** or **VIN** (USB power). Not
+   3V3: most HC-SR04 modules misread or stay silent on 3.3 V.
+3. Sensor **GND** to an ESP32 **GND**.
+4. Sensor **Trig** to **GPIO 26**. No resistor: the ESP32's 3.3 V is enough
+   to trigger the sensor.
+5. Sensor **Echo** to an empty breadboard row. From that row, a **1 kΩ**
+   resistor to a second empty row. From the second row, a wire to **GPIO 27**
+   and a **2 kΩ** resistor to **GND**. GPIO 27 now sees 3.3 V instead of 5 V.
+
+No 1 kΩ and 2 kΩ? Any pair where the resistor to GND is about twice the other
+works: 2.2 kΩ and 4.7 kΩ, 10 kΩ and 20 kΩ, or three equal resistors (one from
+Echo, two in series to GND). Check with a multimeter if you have one: with
+the sensor powered, the GPIO 27 row should never read above 3.3 V.
+
+Do not connect Echo straight to an ESP32 pin. It may work for a while and
+then damage the pin.
+
+### 2. Flash and test
+
+1. Arduino IDE: Boards Manager, install **esp32 by Espressif**. Select
+   "ESP32 Dev Module" and the board's port.
+2. Open `hcsr04.ino`, Upload. If it sits at "Connecting....", hold the
+   board's **BOOT** button until the upload starts.
+3. Serial Monitor at **115200**. A few lines of boot text, then a distance
+   about 15 times a second. Do the 30 cm book test below.
+4. Port not listed on the Mac? The board's USB chip needs a driver: CP210x
+   (Silicon Labs) or CH340, whichever chip is printed near the USB socket.
+   Or the cable is charge-only.
+
+### 3. Solder only what has to survive being carried around
+
+Breadboard contacts are fine on a table and unreliable on a moving phone.
+Once the breadboard version reads correctly:
+
+| Solder this | Why |
+|---|---|
+| Header pins onto the ESP32, if it came without them | Otherwise it cannot sit in the breadboard at all |
+| Four 40 to 50 cm wires onto the HC-SR04's four pins, each joint covered with heat-shrink or tape | The sensor rides on the phone; push-on jumpers work loose |
+| Optional: the two divider resistors onto a small piece of perfboard, or in line on the Echo wire with heat-shrink over them | Removes the last breadboard joint in the signal path |
+
+Use four wire colors and write down which is which. Keep the ESP32 and
+breadboard on the table or in a pocket, and run only the four wires to the
+phone. Leave enough slack to sweep the phone around the room.
+
+Before powering a soldered joint, look for bridges between neighbouring
+pins. VCC touching GND shorts the USB port.
 
 ## Wiring: Arduino Uno or Nano (5 V)
 
@@ -51,7 +112,7 @@ is what the LiDAR cannot do, and why the two are worth combining.
 
 That is the whole circuit. No resistors are needed on a 5 V board.
 
-## Wiring: 3.3 V boards (ESP32, Raspberry Pi Pico, most newer boards)
+## Wiring summary: ESP32 and other 3.3 V boards
 
 The sensor still needs 5 V power, and its ECHO pin outputs 5 V, which can
 damage a 3.3 V input. Drop it with two resistors:
@@ -67,8 +128,8 @@ HC-SR04 Echo -> 1 kΩ -> board GPIO
                        GND
 ```
 
-The GPIO sees 5 V x 2/3 = 3.3 V. Change `TRIG_PIN` and `ECHO_PIN` in the
-sketch to the GPIO numbers you used. Modules marked HC-SR04P or "3-5.5 V"
+The GPIO sees 5 V x 2/3 = 3.3 V. On an ESP32 the sketch already uses GPIO 26
+(Trig) and 27 (Echo). On another board, change `TRIG_PIN` and `ECHO_PIN`. Modules marked HC-SR04P or "3-5.5 V"
 can run from 3.3 V directly, with no resistors.
 
 ## Upload and check the sensor alone
@@ -112,7 +173,9 @@ example `--sonar-mount 0,-0.04,0` for 4 cm above. Left and up are negative.
 
 ## Run it with the mapper
 
-Find the port (`ls /dev/cu.usbmodem* /dev/cu.usbserial*` on a Mac), then:
+Find the port on a Mac with `ls /dev/cu.*`. An ESP32 shows up as
+`/dev/cu.usbserial-XXXX`, `/dev/cu.SLAB_USBtoUART` or `/dev/cu.wchusbserial-XXXX`;
+an Arduino as `/dev/cu.usbmodemXXXX`. Then:
 
 ```sh
 SONAR_PORT=/dev/cu.usbmodem1101 scripts/run-lidar.sh --mapper
