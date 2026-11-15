@@ -39,3 +39,26 @@ resources:
         - task_key: refresh_pipeline
           pipeline_task:
             pipeline_id: ${resources.pipelines.lidar_pipeline.id}
+
+    person_detector_training:
+      name: echosense-person-detector-training
+      description: Train and evaluate the LiDAR person detector on the lakehouse tables; log to MLflow (ADR-0019).
+      tasks:
+        - task_key: train
+          environment_key: default
+          spark_python_task:
+            python_file: ../training/train_person_detector.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.lidar.name}
+              - --detect-path
+              - ${workspace.file_path}/mapper/src/lidar_mapper/detect.py
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - scikit-learn
+              - scipy

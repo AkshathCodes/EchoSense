@@ -28,3 +28,29 @@ def test_detector_finds_a_mound_it_was_trained_on_elsewhere():
     with_person, empty = _room(rng, (0, -0.2)), _room(rng, None)
     assert score_scan(with_person, detect(with_person.grid, model))["found"] == 1
     assert detect(empty.grid, model) == []
+
+
+def _wall_frame(person_at=None, blocker_at=None):
+    """Depth frame looking down +z at a wall 3 m away, optionally with a person-sized slab and a nearer blocker."""
+    K = np.array([[200.0, 0, 160], [0, 200.0, 120], [0, 0, 1]])
+    depth = np.full((240, 320), 3.0)
+    if person_at:
+        depth[60:200, 120:200] = person_at
+    if blocker_at:
+        depth[100:140, 150:170] = blocker_at
+    return depth, K
+
+
+def test_sonar_reading_is_the_person_distance_only_when_the_person_is_nearest_in_the_cone():
+    from lidar_mapper.sonar import person_range
+    R, t = np.eye(3), np.zeros(3)
+    box = [{"min": [-0.3, -0.5, 1.6], "max": [0.3, 0.6, 2.0]}]
+    depth, K = _wall_frame(person_at=1.8)
+    hit = person_range(1.76, depth, K, R, t, box)
+    assert hit["state"] == "person" and hit["source"] == "sonar" and hit["range_m"] == 1.76
+    assert abs(hit["lidar_person_m"] - 1.8) < 0.05
+    assert person_range(None, depth, K, R, t, box)["source"] == "lidar"          # no echo: fall back to LiDAR
+    blocked, _ = _wall_frame(person_at=1.8, blocker_at=0.9)
+    assert person_range(0.9, blocked, K, R, t, box)["state"] == "ambiguous"       # something nearer in the beam
+    away = [{"min": [2.0, -0.5, 1.6], "max": [2.6, 0.6, 2.0]}]
+    assert person_range(1.76, depth, K, R, t, away)["state"] == "no_person"       # not aimed at the box

@@ -46,12 +46,15 @@
   <div class="row"><span>Map voxels</span><span id="nvox">0</span></div>
   <div class="row"><span>Valid depth</span><span id="valid">-</span></div>
   <div class="row"><span>Phone position</span><span id="pos">-</span></div>
+  <div class="row"><span>People found</span><span id="found">-</span></div>
+  <div class="row"><span>Distance to person</span><span id="prange">-</span></div>
   <div class="controls">
     <label>Point size <input id="size" type="range" min="1" max="8" step="0.5" value="2"></label>
     <label>Hide ceiling above <input id="ceil" type="range" min="0" max="100" step="1" value="80"></label>
     <label>Live frame <input id="showFrame" type="checkbox" checked></label>
     <label>Follow phone <input id="follow" type="checkbox"></label>
     <div style="display:flex;gap:6px"><button id="reset">3D view</button><button id="top">Top view</button></div>
+    <button id="find" class="primary">Find people in this map</button>
     <button id="clear" style="border-color:#5a2a2a">Clear map &amp; start new scan</button>
   </div>
 </div>
@@ -239,7 +242,29 @@ $("saveLabels").onclick = () => {
   $("saveStatus").textContent = "saving…";
 };
 
+// ------------------------------------------------------------------ person detector (ADR-0019)
+let detHelpers = [];
+function onDetections(msg) {
+  detHelpers.forEach(h => scene.remove(h));
+  detHelpers = (msg.boxes || []).map(b => {
+    const h = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)), 0x39ff14);
+    scene.add(h); return h;
+  });
+  $("found").textContent = (msg.boxes || []).length
+    ? msg.boxes.map(b => `score ${b.score.toFixed(2)}, ${b.height_m.toFixed(1)} m high`).join("; ") : (msg.note ?? "-");
+  $("prange").textContent = "-";
+}
+function showPersonRange(pr, hasSonar) {
+  if (!detHelpers.length) return;
+  const el = $("prange");
+  if (!pr || pr.state === "no_person") el.textContent = "point the phone at the green box";
+  else if (pr.state === "ambiguous") el.textContent = "ambiguous: something else is in the beam";
+  else el.textContent = `${pr.range_m.toFixed(2)} m (${pr.source})` +
+    (pr.source === "sonar" ? `, LiDAR ${pr.lidar_person_m.toFixed(2)} m` : hasSonar ? ", no sonar echo" : "");
+}
+
 function onLabels(msg) {
+  if (msg.type === "detections") return onDetections(msg);
   $("scanName").textContent = msg.scan ?? "-";
   const sc = msg.scene || {};
   $("lights").value = sc.lights ?? ""; $("room").value = sc.room ?? ""; $("sceneType").value = sc.scene ?? ""; $("notes").value = sc.notes ?? "";
@@ -288,6 +313,7 @@ function onMessage(buf) {
   st.textContent = hdr.status ?? "-";
   st.className = hdr.status === "tracking" ? "status-tracking" : hdr.status === "lost" ? "status-lost" : "status-other";
   document.getElementById("nvox").textContent = (hdr.voxels ?? 0).toLocaleString();
+  showPersonRange(hdr.person_range, hdr.sonar);
   document.getElementById("valid").textContent = hdr.valid == null ? "-" : Math.round(hdr.valid * 100) + "%";
 }
 
@@ -311,7 +337,13 @@ document.getElementById("clear").onclick = () => {
   if (!sock || sock.readyState !== 1) return;
   if (!confirm("Clear the map and start a new scan? The current scan stays saved in its recording file.")) return;
   sock.send("clear");
+  onDetections({ boxes: [], note: "-" });
   fitted = false; userMoved = false; lastMap = null;
+};
+document.getElementById("find").onclick = () => {
+  if (!sock || sock.readyState !== 1) return;
+  $("found").textContent = "searching…";
+  sock.send(JSON.stringify({ cmd: "find" }));
 };
 document.getElementById("top").onclick = () => { mode = "top"; userMoved = false; if (lastMap) fitView(lastMap); };
 

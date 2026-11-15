@@ -10,8 +10,11 @@ sync:
   # Only the pipeline code needs to reach the workspace (no wheel: the pipeline is pure Spark).
   include:
     - databricks/pipeline/*.py
+    - databricks/training/*.py
+    - mapper/src/lidar_mapper/detect.py   # the training job loads the detector code from here
   exclude:
-    - "mapper/**"
+    - "mapper/tests/**"
+    - "mapper/models/**"
     - "ios/**"
 
 variables:

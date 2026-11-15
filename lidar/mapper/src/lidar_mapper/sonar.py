@@ -98,6 +98,61 @@ def compare(sonar_m: float | None, ranges: np.ndarray, valid_fraction: float) ->
     return result
 
 
+def person_range(sonar_m: float | None, depth: np.ndarray, K: np.ndarray, R: np.ndarray, t: np.ndarray,
+                 boxes: list[dict], half_angle_deg: float = 10.0, offset_deg=(0.0, 0.0),
+                 min_share: float = 0.15, front_margin: float = 0.15) -> dict:
+    """Is the sonar reading the distance to a detected person? Pure function.
+
+    `boxes` are detections in world metres ({"min": [x, y, z], "max": [...]}); R, t are world <- camera.
+    The sonar hears the nearest strong reflector anywhere in its cone, so its reading is only the
+    distance to a person when the person fills a fair share of the cone AND nothing in the cone is
+    clearly nearer than them. Otherwise the reading cannot be assigned to the person.
+
+      no_person   no detection box is inside the cone
+      ambiguous   a person is in the cone but so is something nearer, or they fill too little of it
+      person      the person is the nearest thing in the cone: `range_m` is the distance to them
+                  (the sonar reading when there is one, else the LiDAR range)
+    """
+    h, w = depth.shape
+    v, u = np.mgrid[0:h, 0:w]
+    x = (u - K[0, 2]) / K[0, 0]
+    y = (v - K[1, 2]) / K[1, 1]
+    ax, ay = math.tan(math.radians(offset_deg[0])), math.tan(math.radians(offset_deg[1]))
+    dot = (x * ax + y * ay + 1) / (np.sqrt(x * x + y * y + 1) * math.sqrt(ax * ax + ay * ay + 1))
+    cone = (np.arccos(np.clip(dot, -1, 1)) <= math.radians(half_angle_deg)) & np.isfinite(depth) & (depth > 0.05)
+    out = {"state": "no_person", "range_m": None, "source": None, "sonar_m": None, "lidar_person_m": None,
+           "lidar_nearest_m": None, "cone_share": 0.0}
+    if sonar_m is not None and MIN_RANGE <= sonar_m <= MAX_RANGE:
+        out["sonar_m"] = round(float(sonar_m), 3)
+    if cone.sum() < 20 or not boxes:
+        return out
+    d = depth[cone]
+    cam = np.stack([x[cone] * d, y[cone] * d, d], -1)
+    ranges = np.linalg.norm(cam, axis=1)
+    world = cam @ np.asarray(R).T + np.asarray(t)
+    nearest = float(np.percentile(ranges, 10))
+    out["lidar_nearest_m"] = round(nearest, 3)
+    best = None
+    for box in boxes:
+        inside = np.all((world >= np.asarray(box["min"]) - 0.05) & (world <= np.asarray(box["max"]) + 0.05), axis=1)
+        share = float(inside.mean())
+        if inside.sum() >= 20 and (best is None or share > best[0]):
+            best = (share, float(np.percentile(ranges[inside], 10)), float(np.median(ranges[inside])))
+    if best is None:
+        return out
+    share, person_near, person_median = best
+    out.update(cone_share=round(share, 2), lidar_person_m=round(person_median, 3))
+    if share < min_share or person_near > nearest + front_margin:
+        out["state"] = "ambiguous"
+        return out
+    out["state"] = "person"
+    if out["sonar_m"] is not None:
+        out.update(range_m=out["sonar_m"], source="sonar")
+    else:
+        out.update(range_m=round(person_near, 3), source="lidar")
+    return out
+
+
 @dataclass
 class SonarFusion:
     """Holds the newest sonar reading and turns each depth frame into a status and, sometimes, a surface point."""

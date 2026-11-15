@@ -38,6 +38,8 @@ def _common(p) -> None:
     p.add_argument("--sonar-port", help="serial port of the HC-SR04 microcontroller, e.g. /dev/cu.usbmodem1101 "
                                         "(serve only; needs pyserial). See hardware/hcsr04/README.md")
     p.add_argument("--sonar-baud", type=int, default=115200)
+    p.add_argument("--person-model", default="models/person-v0.joblib",
+                   help="person detector for the viewer's Find people button (python -m lidar_mapper.detect train)")
     p.add_argument("--sonar-cone", type=float, default=10.0, help="sonar beam half angle, degrees")
     p.add_argument("--sonar-offset-deg", default="0,0", metavar="RIGHT,DOWN",
                    help="sonar axis relative to the camera axis, degrees")
@@ -119,6 +121,7 @@ def main(argv=None) -> None:
 
     if a.cmd == "serve":
         live = LiveMapper(_mapper(a), view=a.view, record=a.record, capture_stall_s=a.capture_stall_seconds)
+        _load_detector(live, a.person_model)
         if a.sonar_port:
             from .sonar import SerialSonar
             live.sonar = _sonar(a)
@@ -147,6 +150,7 @@ def main(argv=None) -> None:
         live = LiveMapper(_mapper(a), view=a.view, verbose=False,
                           delivery="simulated" if a.cmd == "sim" else "recorded",
                           capture_stall_s=a.capture_stall_seconds)
+        _load_detector(live, a.person_model)
         sidecar = Path(a.file + ".sonar.jsonl") if a.cmd == "replay" else None
         if sidecar is not None and sidecar.exists():
             from .sonar import load_sidecar
@@ -167,6 +171,20 @@ def main(argv=None) -> None:
             print(json.dumps({"frames": len(messages), "ms_per_frame": round(dt * 1000, 1),
                               "tracking": statuses.count("tracking"), "lost": statuses.count("lost")}))
         _finish(live.mapper, a.ply)
+
+
+def _load_detector(live, path: str) -> None:
+    """Person model for Find people. Missing file or missing scikit-learn only disables the button."""
+    from pathlib import Path as _Path
+    if not path or not _Path(path).exists():
+        print(f"[detect] no person model at {path}; Find people is off")
+        return
+    try:
+        import joblib
+        live.detector = joblib.load(path)
+        print(f"[detect] person model {path} loaded")
+    except Exception as exc:
+        print(f"[detect] could not load {path}: {exc}")
 
 
 def _sonar(a, synthetic: bool = False):

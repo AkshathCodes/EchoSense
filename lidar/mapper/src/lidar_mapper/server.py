@@ -89,6 +89,9 @@ class LiveMapper:
         self._disp_voxel = 0.05
         self.sonar = None  # optional SonarFusion (sonar.py)
         self.sonar_replay: dict | None = None  # seq -> range, when replaying a recording with a sidecar
+        self.detector = None  # optional person model (detect.py), set by --person-model
+        self.detections: list[dict] = []  # person boxes from the last "Find people"
+        self.person_range: dict | None = None  # distance to a detected person for the newest frame
 
     # ---------------------------------------------------------------- phone side
     async def phone_handler(self, conn) -> None:
@@ -140,6 +143,11 @@ class LiveMapper:
                     self.sonar.update(self.sonar_replay.get(f.seq))
                 self.sonar.observe(f.depth, f.K, r.R, r.t, tracking=r.status in ("tracking", "relocalized", "merged", "arkit"),
                                    seq=f.seq)
+            if self.detections:
+                from .sonar import person_range
+                reading = self.sonar.latest()[0] if self.sonar is not None else None
+                cone = (self.sonar.half_angle_deg, self.sonar.offset_deg) if self.sonar is not None else (10.0, (0.0, 0.0))
+                self.person_range = person_range(reading, f.depth, f.K, r.R, r.t, self.detections, *cone)
             self.last = (f, r)
             self.mapped += 1
             self.last_ingested_at = time.monotonic()
@@ -285,7 +293,8 @@ class LiveMapper:
             hdr = {"n_map": int(len(mp)) if send_map else -1, "n_frame": int(len(fp)), "n_traj": int(len(tr)),
                    "status": r.status if r else "waiting", "voxels": len(m.map),
                    "valid": f.valid_fraction if f else None,
-                   "pose": [float(x) for x in r.t] if r else None, "segments": len(m.segments)}
+                   "pose": [float(x) for x in r.t] if r else None, "segments": len(m.segments),
+                   "person_range": self.person_range, "sonar": self.sonar is not None}
         hb = json.dumps(hdr).encode()
         pad = (4 - (4 + len(hb)) % 4) % 4
         return (struct.pack("<I", len(hb)) + hb + b"\0" * pad + mp.tobytes() + fp.tobytes() + tr.tobytes())
@@ -311,6 +320,8 @@ class LiveMapper:
                 elif cmd.get("cmd") == "labels":
                     saved = await asyncio.to_thread(self.set_labels, cmd.get("scene", {}), cmd.get("boxes", []))
                     await labels_msg(saved)
+                elif cmd.get("cmd") == "find":
+                    await conn.send(json.dumps({"type": "detections", **await asyncio.to_thread(self.find_people)}))
 
         await labels_msg()  # restore this scan's labels after a page reload
 
@@ -400,12 +411,28 @@ class LiveMapper:
         print(f"[labels] {len(clean)} boxes, scene {self.labels['scene']} -> {saved}", flush=True)
         return saved
 
+    def find_people(self) -> dict:
+        """Run the person detector on the current map. Geometry only, so it does not depend on light."""
+        if self.detector is None:
+            return {"boxes": [], "note": "no person model loaded (start the mapper with --person-model)"}
+        from .detect import build_grid, detect
+        with self.lock:
+            points, _ = self.mapper.map.points(2)
+        if len(points) < 5000:
+            return {"boxes": [], "note": "map too small to search yet"}
+        found = detect(build_grid(points), self.detector)
+        with self.lock:
+            self.detections, self.person_range = found, None
+        print(f"[detect] {len(found)} person box(es): {[(d['score'], d['height_m']) for d in found]}", flush=True)
+        return {"boxes": found, "note": f"{len(found)} found" if found else "nobody found"}
+
     def clear(self) -> str:
         """Wipe the map and start a fresh one; recording continues in a new file (<name>-scan2.esd, ...)."""
         self.save_sidecars()  # keep the finished scan's live map/poses/labels
         with self.lock:
             self.pose_log = []
             self.labels = {"scene": {}, "boxes": []}
+            self.detections, self.person_range = [], None
             m = self.mapper
             m.reset()
             m.segments, m.merges, m.relocalizations = [], 0, 0
