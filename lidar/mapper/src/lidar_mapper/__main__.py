@@ -120,7 +120,8 @@ def main(argv=None) -> None:
         else:
             from .sim import stream
             messages = [protocol.encode(fr) for fr in stream(a.frames)]
-        live = LiveMapper(_mapper(a), view=a.view, verbose=False)
+        live = LiveMapper(_mapper(a), view=a.view, verbose=False,
+                          delivery="simulated" if a.cmd == "sim" else "recorded")
         sidecar = Path(a.file + ".sonar.jsonl") if a.cmd == "replay" else None
         if sidecar is not None and sidecar.exists():
             from .sonar import load_sidecar

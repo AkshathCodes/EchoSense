@@ -53,7 +53,12 @@ def read_records(path: str | Path):
 class LiveMapper:
     """Keeps only the newest phone frame (no queue), maps it, and serves snapshots to viewers."""
 
-    def __init__(self, mapper: Mapper, view: str = "both", record: str | None = None, verbose: bool = True):
+    def __init__(self, mapper: Mapper, view: str = "both", record: str | None = None, verbose: bool = True,
+                 delivery: str = "live"):
+        if delivery not in ("live", "simulated", "recorded"):
+            raise ValueError("Unknown mapper delivery mode")
+        self.delivery = delivery
+        self._acquisitions: set[str] = set()
         self.mapper = mapper
         self.view = view
         self.lock = threading.Lock()
@@ -95,6 +100,11 @@ class LiveMapper:
         f = protocol.decode(msg)
         with self.lock:
             r = self.mapper.process(f)
+            # Raw recordings retain the acquisition source in each depth-frame header.
+            # Unknown legacy sources must never be inferred to be live phone data.
+            acquisition = "simulated" if f.source in ("sim", "simulated", "synthetic") else (
+                "live" if f.source in ("lidar", "arkit") else "recorded")
+            self._acquisitions.add(acquisition)
             pts = backproject(f.depth, f.K, f.confidence, self.mapper.min_conf, max_range=self.mapper.max_range,
                               stride=2)
             self.frame_points = pts @ r.R.T + r.t
@@ -106,6 +116,13 @@ class LiveMapper:
             self.last = (f, r)
             self.mapped += 1
         return f, r
+
+    @property
+    def acquisition_source(self) -> str:
+        """Conservative attribution of the accumulated map, not just its last frame."""
+        if self.delivery == "simulated" or "simulated" in self._acquisitions:
+            return "simulated"
+        return "live" if self._acquisitions == {"live"} else "recorded"
 
     async def worker(self) -> None:
         while True:
@@ -156,7 +173,8 @@ class LiveMapper:
                 if len(fp) > FRAME_POINTS:
                     fp = fp[np.random.default_rng(self.seq).choice(len(fp), FRAME_POINTS, replace=False)]
                 rows += [[round(float(x), 3), round(float(y), 3), round(float(z), 3), 100.0] for x, y, z in fp]
-            meta = {"format_version": "0.2", "source": "live", "sensor_id": "iphone-lidar",
+            acquisition = self.acquisition_source
+            meta = {"format_version": "0.2", "source": acquisition, "sensor_id": "iphone-lidar",
                     "tilt_deg": 0.0, "kind": "lidar_map", "view": self.view}
             if self.sonar is not None:
                 # Sonar-only surfaces go last so they survive the point cap, which trims map points first.
@@ -164,11 +182,14 @@ class LiveMapper:
                          for x, y, z in self.sonar.surface]
                 rows = rows[:max(0, MAX_VIEWER_POINTS - len(extra))] + extra
                 meta["sonar"] = dict(self.sonar.status)
+                # Legacy sonar sidecars contain only seq/range, not original provenance.
+                meta["sonar"]["acquisition_source"] = ("simulated" if self.sonar.synthetic else
+                                                         "recorded" if self.delivery == "recorded" else "live")
             t = float(self.last[0].t) if self.last else 0.0
         self.seq += 1
         return json.dumps({
             "protocol_version": "0.1", "type": "sonar_frame", "sequence": self.seq, "timestamp": t,
-            "source": "live", "acquisition_source": "live",
+            "source": self.delivery, "acquisition_source": acquisition,
             "frame": {"format_version": "0.2",
                       "meta": meta,
                       "points": rows[:MAX_VIEWER_POINTS]},
