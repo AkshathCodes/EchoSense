@@ -51,3 +51,20 @@ test('socket adapter accepts a supplied decoder and ignores events after disconn
   assert.deepEqual(statuses, ['connecting', 'connected', 'disconnected']);
   assert.equal(socket.closed, true);
 });
+
+test('a skipped frame does not overtake an earlier frame still being decoded', async () => {
+  const socket = new EventTarget(), received = [];
+  let finish;
+  openFeed('ws://localhost:9000', {
+    transport: () => socket,
+    decode: data => data === 'skip' ? null : new Promise(resolve => { finish = resolve; }),
+    onFrame: frame => received.push(frame),
+    onStatus() {},
+  });
+  socket.dispatchEvent(new MessageEvent('message', { data: 'map' }));
+  socket.dispatchEvent(new MessageEvent('message', { data: 'skip' }));
+  await new Promise(resolve => setImmediate(resolve));
+  finish({ frame: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(received, [{ frame: 1 }]);
+});

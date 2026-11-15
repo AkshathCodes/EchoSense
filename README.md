@@ -38,6 +38,14 @@ Open `http://127.0.0.1:4173/`, set **Sensor feed** to **Sonar / Preview**
 **LiDAR map**, points are coloured by surface class, and **Room analysis**
 draws the floor plan. **Open dense map** shows the mapper's full-density view.
 
+The mapper viewer uses the existing **LiDAR surface forest v1** weights on
+the accumulated map. Classification runs locally in a browser worker. Live
+depth points keep their separate overlay color. Room analysis, saved mapper
+scans, and PNG exports use the predictions for that map, with footprints,
+class totals, and separate ceiling and uncertain-return layers. The viewer
+uses the geometric classifier if trained inference fails. The weights were
+trained on synthetic scans and have not been validated on real mapper data.
+
 With nothing running, `node serve.js` shows the viewer on built-in mock data.
 
 ### Two LiDAR paths, one port

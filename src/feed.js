@@ -67,7 +67,7 @@ export function openFeed(address, { decode, onFrame, onStatus, onInvalid = () =>
     const id = ++sequence;
     try {
       const frame = await decode(event.data);
-      if (active && id > applied) {
+      if (frame != null && active && id > applied) {
         applied = id;
         onFrame(frame);
       }

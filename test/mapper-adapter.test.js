@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createMapperSession, pointSpacing, classifierSteps, MAPPER_MAX_POINTS } from '../src/mapper-adapter.js';
 import { decodeSocketFrame } from '../src/sonar.js';
 import { simulate } from './scan-simulator.js';
-import { WALL, FLOOR, OBJECT } from '../src/room-classifier.js';
+import { WALL, FLOOR, OBJECT, colorsFor } from '../src/room-classifier.js';
 
 // SYNTHETIC fixtures shaped like the Mac mapper's viewer messages (lidar/mapper server.snapshot).
 // Mapper axes are X forward, Y left, Z up, so a viewer point [x, y, z] goes out as [-z, -x, y].
@@ -46,12 +46,37 @@ test('mapper map frames become classified viewer frames, live points drawn on to
   assert.deepEqual([...frame.colors.slice(-3)].map(n => +n.toFixed(2)), [1, 0.36, 0.25]);
   assert.equal(frame.sonar.delivery, 'live');
   const { analysis } = session;
+  assert.equal(analysis.model, 'LiDAR surface forest v1');
+  assert.equal(frame.mapper.analysis, analysis);
+  assert.deepEqual(frame.colors.subarray(0, room.length), colorsFor(analysis.labels, room.length / 3));
   assert.ok(Math.abs(analysis.floorY + 1.3) < 0.06 && Math.abs(analysis.roomHeight - 2.5) < 0.1);
   assert.ok(analysis.counts[WALL] > analysis.counts[FLOOR] && analysis.counts[OBJECT] > 0);
   for (const [x, z, h] of [[0, -1.55, 0.8], [1.5, 0, 0.75], [-1.55, 1.25, 0.5]]) {
     assert.ok(analysis.objects.some(o => Math.abs(o.center[0] - x) < 0.4 && Math.abs(o.center[1] - z) < 0.4 &&
       Math.abs(o.height - h) < 0.15), `no object near ${x}, ${z}`);
   }
+});
+
+test('failed trained inference falls back to the geometric plan for the same map', async () => {
+  const session = createMapperSession({ classify: async () => { throw new Error('worker unavailable'); } });
+  const frame = await session.decode(mapperMessage(room, { hits: scan.hits, live: [[0, 0, -1]] }));
+  assert.equal(frame.mapper.analysis.model, undefined);
+  assert.equal(frame.mapper.analysis.labels.length, room.length / 3);
+  assert.ok(frame.mapper.analysis.floorCells.length > 0);
+});
+
+test('a map change during inference yields rather than applying classes to the wrong points', async () => {
+  let finish;
+  const session = createMapperSession({ classify: () => new Promise(resolve => { finish = resolve; }) });
+  const first = session.decode(mapperMessage(room, { hits: scan.hits }));
+  const changed = mapperMessage(room.subarray(0, room.length - 3), { sequence: 8, hits: scan.hits });
+  assert.equal(await session.decode(changed), null);
+  finish({ labels: new Uint8Array(room.length / 3), objects: [], floorArea: 0, roomHeight: null, model: 'test' });
+  const frame = await first;
+  assert.equal(frame.mapper.analysis.labels.length, room.length / 3);
+  const resumed = session.decode(changed);
+  finish({ labels: new Uint8Array(room.length / 3 - 1), objects: [], floorArea: 0, roomHeight: null, model: 'test' });
+  assert.equal((await resumed).mapper.analysis.labels.length, room.length / 3 - 1);
 });
 
 for (const size of [0.08, 0.12]) {

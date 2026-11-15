@@ -13,6 +13,7 @@
  * the mapper does not send them on this channel.
  */
 import { classifyRoom, colorsFor } from './room-classifier.js';
+import { analyseLidar } from './lidar-analysis.js';
 
 export const MAPPER_MAX_POINTS = 60000;
 const LIVE_COLOR = [1, 0.36, 0.25];
@@ -57,16 +58,19 @@ export function classifierSteps(nearest) {
     minObjectPoints: layer > 0.05 ? 8 : 15, minObjectDensity: layer > 0.05 ? 1 : 2.5 };
 }
 
-export function createMapperSession() {
-  let analysis = classifyRoom(new Float32Array()), signature = '';
+const sameMap = (scan, points, hits) => scan?.points.length === points.length &&
+  points.every((value, i) => value === scan.points[i]) && hits.every((value, i) => value === scan.hits[i]);
+
+export function createMapperSession({ classify = analyseLidar } = {}) {
+  let analysis = classifyRoom(new Float32Array()), cached, pending;
   return {
-    /** Latest room classification of the map points. See src/room-classifier.js. */
+    /** Latest room classification of the map points. */
     get analysis() { return analysis; },
     reset() {
       analysis = classifyRoom(new Float32Array());
-      signature = '';
+      cached = pending = undefined;
     },
-    /** Returns a viewer frame for mapper map messages, or undefined for any other payload. */
+    /** Null skips a busy mapper frame; undefined allows another protocol decoder. */
     async decode(payload) {
       if (payload instanceof Blob) payload = await payload.text();
       if (payload instanceof ArrayBuffer) payload = new TextDecoder().decode(payload);
@@ -90,21 +94,43 @@ export function createMapperSession() {
         points.set([-y, z, -x], i * 3);
         if (strength < 100) { hits[i] = strength; hitSum += strength; }
       }
-      const map = points.subarray(0, mapCount * 3);
-      // The mapper resends the same thinned map until it grows by 2%, so classify only on change.
-      const next = `${mapCount}:${map[0]}:${map[map.length - 1]}:${hitSum}`;
-      if (next !== signature) {
-        signature = next;
-        analysis = classifyRoom(map, { hits: hits.subarray(0, mapCount), ...classifierSteps(pointSpacing(map)) });
+      const map = points.subarray(0, mapCount * 3), mapHits = hits.subarray(0, mapCount);
+      let result = cached;
+      if (!sameMap(cached, map, mapHits)) {
+        if (pending && !sameMap(pending, map, mapHits)) return null;
+        let job = pending;
+        if (!job) {
+          const baselineOptions = classifierSteps(pointSpacing(map));
+          job = { points: map, hits: mapHits };
+          pending = job;
+          job.result = (async () => {
+            let report;
+            try {
+              report = await classify(map, { hits: mapHits, baselineOptions });
+              if (report.labels.length !== mapCount) throw new Error('Class count does not match the map');
+            } catch {
+              report = classifyRoom(map, { hits: mapHits, ...baselineOptions });
+            }
+            if (pending !== job) return null;
+            analysis = report;
+            cached = { points: map, hits: mapHits, report, colors: colorsFor(report.labels, mapCount) };
+            pending = undefined;
+            return cached;
+          })();
+        }
+        result = await job.result;
+        if (!result) return null;
       }
       const colors = new Float32Array(rows.length * 3);
-      colors.set(colorsFor(analysis.labels, mapCount));
+      colors.set(result.colors);
       for (let i = mapCount; i < rows.length; i++) colors.set(LIVE_COLOR, i * 3);
+      const report = result.report;
+      const acquisition = raw.acquisition_source ?? 'live', delivery = raw.source ?? 'live';
       return { points, colors, hits, frame: raw.sequence, captureTime: raw.timestamp,
         snr: mapCount ? hitSum / mapCount : null,
-        sonar: { delivery: 'live', acquisition: 'live', detectionCount: null },
-        mapper: { mapPoints: mapCount, livePoints: rows.length - mapCount, objects: analysis.objects.length,
-          floorArea: analysis.floorArea, roomHeight: analysis.roomHeight } };
+        sonar: { delivery, acquisition, detectionCount: null },
+        mapper: { mapPoints: mapCount, livePoints: rows.length - mapCount, objects: report.objects.length,
+          simulated: acquisition === 'simulated', analysis: report, floorArea: report.floorArea, roomHeight: report.roomHeight } };
     },
   };
 }
