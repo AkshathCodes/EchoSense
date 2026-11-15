@@ -141,7 +141,7 @@ and generator are committed.
 
 ## Reproduction, Windows PowerShell
 
-Use the new isolated worktree `C:\Users\charv\EchoRescue-main-reliability-local`.
+Run these commands from the repository root, with the dev dependencies in `.venv`.
 Terminal 1 at its root:
 
 ```powershell
@@ -151,7 +151,7 @@ node serve.js
 Terminal 2 at the same root, reusing the tested isolated interpreter:
 
 ```powershell
-$python = 'C:\Users\charv\EchoRescue-pr8-preflight-local\.venv\Scripts\python.exe'
+$python = (Resolve-Path .venv/Scripts/python.exe).Path
 $env:PYTHONPATH = (Resolve-Path lidar/mapper/src).Path
 $env:OPENBLAS_NUM_THREADS = '1'
 $env:OMP_NUM_THREADS = '1'
@@ -172,7 +172,7 @@ Do not start another mapper/bridge/combined launcher on the same ports.
 For tests, stop only the demo processes you started, then from the same root:
 
 ```powershell
-$python = 'C:\Users\charv\EchoRescue-pr8-preflight-local\.venv\Scripts\python.exe'
+$python = (Resolve-Path .venv/Scripts/python.exe).Path
 $env:PYTHONPATH = @((Resolve-Path lidar/mapper/src).Path,
   (Resolve-Path websocket-bridge).Path,
   (Resolve-Path sonar-ml/perception/src).Path) -join ';'
@@ -185,7 +185,7 @@ node --test
 & $python -B -m pytest sonar-ml/perception/tests -q -ra
 & $python -B websocket-bridge/range_smoke_test.py
 $env:ECHO_PYTHON = $python
-$env:ECHO_PLAYWRIGHT_MODULE = 'C:\Users\charv\EchoRescue-pr8-preflight-local\.venv\browser\node_modules\playwright\index.mjs'
+$env:ECHO_PLAYWRIGHT_MODULE = (Resolve-Path .venv/browser/node_modules/playwright/index.mjs).Path
 node scripts/demo-reliability-smoke.mjs
 ```
 

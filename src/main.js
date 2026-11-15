@@ -5,7 +5,7 @@ import { openFeed } from './feed.js';
 import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
 import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL, LIDAR_REPLAY_BYTES, readLidarReplay } from './lidar.js';
 import { createCues } from './audio-cues.js';
-import { createMapperSession, mapperLabel, sonarText } from './mapper-adapter.js';
+import { createMapperSession, mapperLabel, captureText, sonarText } from './mapper-adapter.js';
 import { createMapperClassifier } from './mapper-classifier.js';
 import { drawRoomPlan } from './room-plan.js';
 import { drawLidarSchematic } from './lidar-schematic.js';
@@ -213,6 +213,7 @@ function showScanSource() {
   const mapped = live && !scan ? latest.mapper : null;
   source.toggleAttribute('data-live', live && (scan ? Boolean(disconnect && scan.publisher && scan.simulated === false && scan.mode === 'live')
     : Boolean(disconnect && (mapped ? !mapped.stale && mapped.delivery === 'live' && mapped.acquisition === 'live'
+      && mapped.capture?.mode === 'live' && mapped.capture.state === 'active'
       : sonar?.delivery === 'live' && sonar?.acquisition === 'live'))));
   writeSource(!live ? 'Mock data' : scan ? (disconnect || scan.mode === 'replay' ? '' : 'Last scan · ') + lidarLabel(scan)
     : mapped ? mapperLabel(mapped) : sonar ? sonarLabel(sonar) : 'Socket data');
@@ -436,6 +437,13 @@ el('connection-form').addEventListener('submit', event => {
       onStatus: status,
       onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
+        if (firstFrame && latest.mapper?.stale && livePoints?.length && frame.mapper &&
+            !frame.mapper.mapPoints && !frame.mapper.livePoints) {
+          const phase = frame.mapper.capture?.state ?? 'waiting';
+          set('connection-state', `Mapper connected / ${phase}`);
+          note.textContent = 'Showing last map (historical). Waiting for observations from the new mapper.';
+          return;
+        }
         if (firstFrame) {
           firstFrame = false;
           scanCameraBeforeSonar ??= savedMap ? scanSettings.camera : viewer?.camera();
@@ -466,10 +474,15 @@ el('connection-form').addEventListener('submit', event => {
           const m = latest.mapper;
           note.textContent = `${numbers.format(m.mapPoints)} map points · ${m.objects} object${m.objects === 1 ? '' : 's'} · ` +
             `floor seen ${m.floorArea.toFixed(1)} m²` + (m.roomHeight === null ? '' : ` · ceiling ${m.roomHeight.toFixed(2)} m`) +
-            ` · ${m.analysis.model ?? 'Geometric fallback'}`;
+            ` · ${m.analysis.model ?? 'Geometric fallback'} · ${captureText(m.capture)}`;
+          if (m.capture) set('connection-state', `Mapper connected / ${m.capture.state === 'active'
+            ? m.capture.mode === 'live' ? 'Capturing' : m.capture.mode : m.capture.state}`);
           const readout = el('sonar-readout');
-          readout.hidden = Boolean(savedMap) || !m.sonar;
-          if (m.sonar) {
+          readout.hidden = Boolean(savedMap) || !m.stale && !m.sonar;
+          if (m.stale) {
+            readout.textContent = 'Sonar unavailable: depth capture is not current; previous markers are historical.';
+            readout.removeAttribute('data-blind');
+          } else if (m.sonar) {
             readout.textContent = sonarText(m.sonar) + (m.sonar.surfacePoints ? ` · ${m.sonar.surfacePoints} marked` : '');
             readout.toggleAttribute('data-blind', m.sonar.blind);
             if (m.sonar.blind) cues.play('lidar_blind');
