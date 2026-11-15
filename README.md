@@ -51,7 +51,9 @@ With an HC-SR04 strapped to the phone ([guide](hardware/hcsr04/README.md)),
 cross-check: the viewer shows the sonar and LiDAR distances side by side and
 marks, in magenta, surfaces only the sonar can detect, such as glass.
 `SONAR_SIM=1 scripts/run-lidar.sh --mapper-sim` shows it with simulated
-readings. Not yet run on hardware.
+readings. The sensor and firmware have run on the team's XIAO nRF52840
+Sense, feeding the mapper alongside simulated phone frames (PR #11). The sonar
+has not yet been run together with a real phone scan.
 
 With nothing running, `node serve.js` shows the viewer on built-in mock data.
 

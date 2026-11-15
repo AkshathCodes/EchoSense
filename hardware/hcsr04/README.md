@@ -36,11 +36,41 @@ is what the LiDAR cannot do, and why the two are worth combining.
 ## Parts
 
 - HC-SR04 module (4 pins: VCC, Trig, Echo, GND)
-- ESP32 dev board (what the team has) or an Arduino Uno or Nano, with a USB
-  **data** cable to the Mac. Many micro-USB cables are charge-only.
-- Breadboard and jumper wires
-- 4 wires, 40 to 50 cm, from the sensor on the phone to the board
-- For the ESP32: one 1 kΩ and one 2 kΩ resistor (or the substitutes below)
+- A microcontroller board with a USB **data** cable to the laptop. The team
+  uses a Seeed XIAO nRF52840 Sense. An ESP32 dev board or an Arduino Uno or
+  Nano also works. Many USB cables are charge-only.
+- Breadboard and three jumper wires
+- For any 3.3 V board (XIAO, ESP32, Pico): three 10 kΩ resistors, or one 1 kΩ
+  and one 2 kΩ. A 5 V Arduino needs none.
+
+## XIAO on a breadboard, three 10 kΩ resistors
+
+This is the layout for the team's breadboard build. The firmware has been
+compiled, flashed and read back on a XIAO nRF52840 Sense with the sensor on
+D6 and D5 (PR #11).
+
+A breadboard's five holes in each short row are joined, so every pin needs a
+row of its own.
+
+1. Push the XIAO across the center gap with the USB-C socket pointing down
+   the board. Its right-hand pins, from the far end toward the USB socket,
+   are D6 (TX), D5, D4, D3, D2, D1, D0. Its left-hand pins are D7, D8, D9,
+   D10, 3V3, GND, 5V.
+2. Stand the sensor on its four pins along the outer column of the right
+   half, a few rows below the XIAO, cans facing off the board. One pin per
+   row. Read the labels printed on the sensor: Gnd, Echo, Trig, Vcc.
+3. Resistor 1: from the **Echo** row to the **D5** row.
+4. Resistor 2: from the **D5** row to an empty row.
+5. Resistor 3: from that empty row to the **Gnd** row.
+6. Wire: **Trig** row to the **D6** row.
+7. Wire: **Vcc** row to the **5V** pin's row on the left half.
+8. Wire: **Gnd** row to the **GND** pin's row on the left half.
+
+D5 then sees 5 V x 20/30 = 3.3 V. Echo must share a row with resistor 1 and
+nothing else. Keep bare resistor legs from touching where they cross. Three
+10 kΩ is the high end for this divider. If readings jump, use 1 kΩ and 2 kΩ.
+
+Resistors and plain wires have no direction. The sketch needs no changes.
 
 ## Seeed Studio XIAO build, soldered, no breadboard
 
@@ -48,8 +78,8 @@ This assumes a **Seeed Studio XIAO** (ESP32C3, ESP32S3, RP2040, SAMD21 or
 nRF52840). All of them use 3.3 V pins, so the Echo divider is still needed.
 A 5 V Seeeduino wires like the Arduino table further down instead.
 
-Team build: XIAO nRF52840 on a 3 x 7 cm perfboard, sensor soldered to the
-same board just below it. Hold the board with the USB-C socket at the top and
+Earlier plan, kept for a permanent build: XIAO nRF52840 on a 3 x 7 cm
+perfboard, sensor soldered to the same board just below it. Not built. Hold the board with the USB-C socket at the top and
 the XIAO's label facing you. Pads from the USB end: left side D0, D1, D2, D3,
 D4, D5, D6; right side 5V, GND, 3V3, D10, D9, D8, D7.
 
@@ -89,7 +119,8 @@ insulated is safer: strands from a spare USB or Ethernet cable work well.
 
 Flash it: in the Arduino IDE add Seeed's board package for your XIAO model,
 select the board and port, open `hcsr04.ino`, Upload. If the port does not
-appear, hold the tiny **B** (boot) button while plugging in USB. Open the
+appear, hold the tiny **B** (boot) button while plugging in USB (on the
+nRF52840, double-tap the reset button instead). Open the
 Serial Monitor at 115200. The first line names the pins the sketch chose,
 then readings. If that first line says `trig pin 9 echo pin 10`, the sketch
 did not recognise the board: uncomment `#define SEEED_XIAO` at the top and

@@ -26,11 +26,12 @@
     defined(ARDUINO_Seeed_XIAO_nRF52840_Sense)
 // XIAO pads D6 (Trig) and D5 (Echo): the two pads nearest the sensor when it
 // sits below the XIAO on the perfboard, so no long wires are needed.
-// XIAO pins are 3.3 V, so ECHO needs the 1k / 2k divider.
+// XIAO pins are 3.3 V, so ECHO needs a divider: 1k / 2k, or one 10k with two
+// 10k in series to GND.
 const uint8_t TRIG_PIN = D6;
 const uint8_t ECHO_PIN = D5;
 #elif defined(ESP32)
-// Classic ESP32 DevKit. ECHO must come through the 1k / 2k divider: the sensor
+// Classic ESP32 DevKit. ECHO must come through the same divider: the sensor
 // drives it at 5 V and ESP32 pins take 3.3 V at most.
 const uint8_t TRIG_PIN = 26;
 const uint8_t ECHO_PIN = 27;
