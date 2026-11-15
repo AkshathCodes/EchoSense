@@ -96,6 +96,10 @@
           <label class="row lidar-file" id="lidar-file-row">Open LiDAR replay
             <input type="file" id="lidar-file" accept=".jsonl,application/jsonl,application/x-ndjson">
           </label>
+          <div id="mapper-tools" class="mapper-tools" hidden>
+            <button id="mapper-analyse" type="button">Room analysis</button>
+            <a href="http://127.0.0.1:8780/" target="_blank" rel="noopener">Open dense map</a>
+          </div>
         </section>
         <section id="lidar-panel" class="controls lidar-panel" aria-label="LiDAR spatial memory" hidden>
           <div class="row"><span>Observed floor area</span><strong id="lidar-observed">0.0 m²</strong></div>

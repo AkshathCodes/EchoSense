@@ -107,7 +107,7 @@ export function drawRoomPlan(canvas, analysis, { path = [], simulated = false, t
   swatch(css(classColors[WALL]), 'Wall or tall structure');
   swatch('#17323c', 'Floor seen');
   swatch(objectTints[0], 'Object (letter · height)');
-  swatch('#ff7a59', 'Scanner path');
+  if (path.length) swatch('#ff7a59', 'Scanner path');
   ctx.strokeStyle = '#33485a';
   ctx.strokeRect(lx + 0.5, by - 3.5, 11, 11);
   ctx.fillStyle = '#c5d3dc';

@@ -32,13 +32,16 @@
  *     listed. An object's height is the 95th percentile of its points.
  *
  * It does not recognise what an object is. It reports size and height only.
+ *
+ * `layer` (height step) and `column` (plan step) default to 5 and 10 cm, which
+ * suits points about 5 cm apart. For a thinned map pass larger steps, or
+ * walls look half empty and stop counting as walls.
  */
 export const UNCLASSIFIED = 0, FLOOR = 1, WALL = 2, CEILING = 3, OBJECT = 4;
 export const classNames = ['Unclassified', 'Floor', 'Wall', 'Ceiling', 'Object'];
 /** RGB 0..1 per class, chosen to stay distinct on the viewer's dark background. */
 export const classColors = [[0.45, 0.5, 0.55], [0.16, 0.5, 0.56], [0.93, 0.95, 0.97], [0.42, 0.4, 0.75], [1.0, 0.62, 0.2]];
 
-const LAYER = 0.05;
 const key = (a, b) => (a + 32768) * 65536 + (b + 32768);
 const unkey = k => [Math.floor(k / 65536) - 32768, k % 65536 - 32768];
 
@@ -79,7 +82,7 @@ function supported(points, n, hits, threshold) {
   return ok;
 }
 
-export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBand = 0.12, wallHeight = 1.2,
+export function classifyRoom(points, { column = 0.1, layer = 0.05, floorBand = 0.1, ceilingBand = 0.12, wallHeight = 1.2,
   wallFill = 0.4, minCeiling = 1.9, minObjectCells = 6, minObjectPoints = 15, objectClearance = 0.12,
   minObjectDensity = 2.5, minSupport = 6, minSupportHits = 14, hits = null } = {}) {
   const n = points.length / 3;
@@ -97,19 +100,19 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     kept++;
   }
   if (kept < 50) return empty;
-  const layers = Math.max(1, Math.ceil((high - low) / LAYER) + 1);
+  const layers = Math.max(1, Math.ceil((high - low) / layer) + 1);
   const histogram = new Uint32Array(layers);
-  for (let i = 0; i < n; i++) if (solid[i]) histogram[Math.floor((points[i * 3 + 1] - low) / LAYER)]++;
+  for (let i = 0; i < n; i++) if (solid[i]) histogram[Math.floor((points[i * 3 + 1] - low) / layer)]++;
   // "A real share": well above what a few leftover strays could add up to.
   const share = Math.max(20, kept * 0.004);
   let floorLayer = 0;
   while (floorLayer < layers - 1 && histogram[floorLayer] < share) floorLayer++;
   floorLayer = peakNear(histogram, floorLayer, floorLayer + 3);
-  const floorY = low + (floorLayer + 0.5) * LAYER;
+  const floorY = low + (floorLayer + 0.5) * layer;
   let ceilingLayer = layers - 1;
   while (ceilingLayer > 0 && histogram[ceilingLayer] < share) ceilingLayer--;
   ceilingLayer = peakNear(histogram, ceilingLayer - 3, ceilingLayer);
-  const ceilingGuess = low + (ceilingLayer + 0.5) * LAYER;
+  const ceilingGuess = low + (ceilingLayer + 0.5) * layer;
   // Compare with the layers 0.3 to 1.0 m below: wall-only layers all look alike.
   const below = median(Array.from(histogram.subarray(Math.max(0, ceilingLayer - 20), Math.max(0, ceilingLayer - 6))));
   const ceilingY = ceilingGuess - floorY >= minCeiling && histogram[ceilingLayer] >= 2 * below ? ceilingGuess : null;
@@ -125,12 +128,12 @@ export function classifyRoom(points, { column = 0.1, floorBand = 0.1, ceilingBan
     if (!c) columns.set(k, c = { min: Infinity, max: -Infinity, layers: new Set() });
     c.min = Math.min(c.min, y);
     c.max = Math.max(c.max, y);
-    c.layers.add(Math.floor((y - floorY) / LAYER));
+    c.layers.add(Math.floor((y - floorY) / layer));
   }
   const wall = new Set();
   for (const [k, c] of columns) {
     const span = c.max - Math.min(c.min, floorY + floorBand);
-    if (c.max - floorY >= wallHeight && c.layers.size * LAYER >= span * wallFill) wall.add(k);
+    if (c.max - floorY >= wallHeight && c.layers.size * layer >= span * wallFill) wall.add(k);
   }
   // Sensor noise spreads a wall over neighbouring columns that are tall but sparse.
   // Adopt them (two passes, so up to 20 cm) or they show up as thin tall "objects".

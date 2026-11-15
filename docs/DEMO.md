@@ -1,61 +1,95 @@
 # ECHO RESCUE demo plan
 
-Owner: Ryan. Draft: nothing here has been rehearsed with the real phone yet.
+Owner: Ryan. Nothing below has been rehearsed end to end on the real phone yet.
 
-## One-line pitch
+## One line
 
-ECHO RESCUE turns live spatial observations into persistent, reviewable
-environmental intelligence for simulated search-and-rescue planning.
+ECHO RESCUE maps a room with iPhone LiDAR without relying on light, keeps what
+it saw, and shows what it never saw.
+
+Use the same line in the README, the Devpost page and the pitch.
+
+## Before judging: three things only a person with the phone can do
+
+1. **Scan with the lights off.** The claim is "works without light" and it has
+   not been tested. Do one scan lights on and one lights off in the same room.
+   Export both with `--label lights=on` and `--label lights=off`. If the dark
+   scan tracks worse, say so in the pitch with the numbers.
+2. **Record the backup.** Keep the best real `.esd` from step 1. Check it
+   replays: `scripts/run-lidar.sh --mapper-replay lidar/mapper/recordings/<file>.esd`.
+3. **Open Room analysis on a real scan.** The classifier has only seen
+   simulated rooms. Look at whether walls, floor and furniture come out
+   right, and send Ryan a screenshot if not: the thresholds are in
+   `src/mapper-adapter.js` (`classifierSteps`) and `src/room-classifier.js`.
 
 ## Setup (10 minutes before)
 
-1. Laptop on the phone's Personal Hotspot.
-2. `node serve.js`, then the bridge with `--lidar --record demo.jsonl`.
-3. Phone app: Laptop, enter the address the bridge prints, Connect.
-4. Browser: Connect. Tick **Audio cues**. Badge should say waiting for phone,
-   then update when Start scan is pressed.
-5. Props: one table or chair in open floor, one doorway or corner to leave
-   unscanned on purpose, one box to move for the stretch step.
+1. iPhone Personal Hotspot over USB to the Mac.
+2. `scripts/run-lidar.sh --mapper` in the repo. Do not start the bridge: both
+   use port 8765.
+3. Phone app: Mac URL `ws://172.20.10.2:8770/depth` (check the Mac's address),
+   depth source LiDAR only, Start streaming.
+4. Browser: `http://127.0.0.1:4173/`, Sensor feed **Sonar / Preview**, Connect.
+   A second tab on `http://127.0.0.1:8780/` for the dense map.
+5. Props: a table or chair in open floor, a box, and one corner or doorway you
+   will leave unscanned on purpose.
+
+## How to scan so tracking holds
+
+From the real runs in the mapper log:
+
+- Start pointed at a wall 1 to 3 m away, not at a desk or your hand. The map
+  will not start on a surface closer than half a meter.
+- Sweep slowly. Fast pans into new area are where tracking was lost.
+- Overlap: keep part of what you already scanned in view as you turn.
+- Do not just spin in place. Take a step or two and revisit earlier areas.
+- Do not stop and restart the app mid-scan. A restart can split the map.
+- Stay within about 3.5 m of what you are mapping.
+- Long blank walls and corridors are the weak case. Keep a corner or
+  furniture in view.
 
 ## Sequence (about 3 minutes)
 
-| Step | Do | Say | Viewer shows |
+| Step | Do | Say | Screen |
 |---|---|---|---|
-| 1 | Start scan, sweep the near wall and the table | "This is real LiDAR from the phone, about a thousand points three times a second." | Points appear; badge reads Live LiDAR |
-| 2 | Walk two or three meters, keep scanning | "ECHO records where the scanner has been." | Orange path grows; Scanner path meters rise |
-| 3 | Turn your back on the first wall | "The phone no longer sees that wall. ECHO still has it." | First wall stays |
-| 4 | Point at the coverage map; leave the doorway unscanned | "Dark cells have no measurement. We never call them clear." | Dark region behind the doorway |
-| 4b | Click **Room analysis** | "ECHO sorts what it saw into floor, walls and objects, and measures each object. It does not claim to know what they are." | Labelled floor plan; table shows as an object with its height |
-| 5 | Cover the camera for two seconds | "When tracking fails, ECHO says so and stores nothing." | Tracking cue; skipped-frame count rises; no smear |
-| 6 | Stop scan, Save snapshot, open Saved Maps | "The exploration can be reviewed later." | Saved map with replay |
-| 7 (stretch) | Restart the bridge with `--lidar-replay demo.jsonl`, Connect | "Same session, replayed from the recording." | Badge reads LiDAR replay |
-
-The moment to land: step 3 into step 4. A LiDAR viewer shows what the sensor
-sees now. ECHO shows what was seen, from where, and what was never seen.
+| 1 | Start streaming, sweep the near wall and the table | "Depth from the phone's LiDAR, position from the depth and motion sensors. No camera image is used." | Map fills in; badge reads LiDAR map |
+| 2 | Step sideways, keep scanning | "It keeps what it has seen as we move." | Earlier walls stay while new ones appear |
+| 3 | Switch to the dense map tab | "This is the full map, a few hundred thousand points." | Dense view |
+| 4 | Back to the viewer, click **Room analysis** | "It sorts the map into floor, walls and objects and measures each object. It does not claim to know what they are." | Floor plan with lettered objects and heights |
+| 5 | Point at the black area you left unscanned | "Black is not observed. We never call that clear." | Unscanned corner stays black |
+| 6 (if the dark test passed) | Lights off, scan a new section | "Same result with the lights off." | Map keeps growing |
+| 7 | Download PNG; Save snapshot | "The plan and the scan can be reviewed afterwards." | Saved map |
 
 ## If something fails
 
-| Failure | Fallback |
+| Failure | Do |
 |---|---|
-| Phone cannot reach laptop | Check hotspot; otherwise run `--lidar-replay` of a real recording made earlier and say it is a replay |
-| Tracking keeps dropping | More light, slower motion, torch on, point at textured surfaces |
-| App will not build or crashes | Replay a real recording if one exists. If none exists, show the synthetic publisher and say plainly that it is simulated |
-| Browser shows nothing | Check the bridge's `--origin` matches the page address exactly |
+| Phone cannot reach the Mac | Check hotspot and the Mac address. Otherwise replay the real recording and say it is a replay |
+| Map stays empty | Point at a wall 1 to 3 m away and hold for a few seconds |
+| Status shows `lost` | Stop moving, point back at something already mapped, wait |
+| Map splits or smears | Stop streaming, restart the mapper, rescan slower. Or switch to the replay |
+| Viewer shows nothing | Sensor feed must be Sonar / Preview and the address `ws://127.0.0.1:8765/ws` |
+| Room analysis looks wrong | Scan walls floor to head height first. Partly scanned walls show up as tall "objects" |
 
-Record a real session as soon as the phone works, and keep that file. A
-synthetic run is not a substitute and must not be described as a scan.
+A simulated run (`--mapper-sim`) is a last resort and must be described as
+simulated.
 
 ## Limits to state out loud
 
-- Phone LiDAR reaches about 5 m and does not see through walls, smoke or fog.
-- Position tracking uses the camera, so it needs some light and texture.
-- "Seen through" means one ray crossed a cell at some height. It is not proof
-  the cell is empty.
-- Observed geometry is not proof an area is safe or fully searched.
-- The classifier is geometric rules, not a trained model. It separates floor, wall, ceiling and object and measures objects. It does not identify them or detect people.
+- About 3.5 m useful range. No seeing through walls, smoke or fog.
+- Position comes from matching depth frames, so blank walls and fast motion
+  can lose it.
+- The classifier is geometric rules, not a trained model. It measures objects
+  and does not identify them or detect people. Anything taller than 1.2 m,
+  such as a person or a door, is labelled wall.
+- Not observed is not the same as empty or safe.
 
-## Not built
+## Parked
 
-- Region-change detection between two LiDAR sessions.
-- Viewer-side button to start a bridge replay (replay is a bridge command).
-- Headgear mockup.
+- Bridge path (`websocket-bridge --lidar`, `ios-lidar/`): fallback only. It
+  has a coverage map, scanner path and audio cues, but its app has never been
+  compiled.
+- Sonar range ingestion (PR #6): no hardware to test with.
+- Databricks: works per the mapper log. Mention it only if a sponsor prize
+  needs it.
+- Change detection between two scans, headgear mockup: not built.

@@ -5,6 +5,7 @@ import { openFeed } from './feed.js';
 import { decodeSocketFrame, sonarLabel, SONAR_URL } from './sonar.js';
 import { createLidarSession, drawCoverage, lidarLabel, LIDAR_URL, LIDAR_REPLAY_BYTES, readLidarReplay } from './lidar.js';
 import { createCues } from './audio-cues.js';
+import { createMapperSession } from './mapper-adapter.js';
 import { drawRoomPlan } from './room-plan.js';
 import { classifyRoom, classNames } from './room-classifier.js';
 import { openArchive, positions, sampleHistory, thumbnail } from './archive.js';
@@ -28,6 +29,9 @@ async function decodeLidar(payload) {
   if (!frame) throw new Error('Expected LiDAR v1');
   return frame;
 }
+// Rishi's mapper (lidar/mapper) sends its map in the sonar envelope. Give it surface classes.
+const mapper = createMapperSession();
+const decodeSonarOrMapper = async payload => await mapper.decode(payload) ?? decodeSocketFrame(payload);
 const marker = el('target-marker'), loading = el('loading');
 const labels = anchors.map((_, i) => {
   const label = document.createElement('span');
@@ -205,19 +209,21 @@ function showScanSource() {
   const sonar = latest.sonar, scan = latest.lidar;
   source.toggleAttribute('data-live', live && (scan ? Boolean(disconnect && scan.publisher && scan.simulated === false && scan.mode === 'live')
     : sonar?.acquisition !== 'simulated'));
+  const mapped = live && !scan ? latest.mapper : null;
   writeSource(!live ? 'Mock data' : scan ? (disconnect || scan.mode === 'replay' ? '' : 'Last scan · ') + lidarLabel(scan)
-    : sonar ? sonarLabel(sonar) : 'Socket data');
+    : mapped ? 'LiDAR map' : sonar ? sonarLabel(sonar) : 'Socket data');
   set('study', !live ? 'Living room / sample scan' : scan ? 'LiDAR · Spatial memory'
-    : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
+    : mapped ? 'LiDAR · Mapped room' : sonar ? 'Sonar · Sensor-relative scan' : 'Incoming room scan');
+  el('mapper-tools').hidden = !mapped;
   el('lidar-panel').hidden = !(live && scan);
   // In LiDAR mode the "color" render mode shows the classifier's surface classes.
-  mode.querySelector('[value="color"]').textContent = live && scan ? 'Surface classes' : 'Natural color';
-  if (live && scan && !classModeChosen) {
+  mode.querySelector('[value="color"]').textContent = live && (scan || mapped) ? 'Surface classes' : 'Natural color';
+  if (live && (scan || mapped) && !classModeChosen) {
     classModeChosen = true;
     mode.value = 'color';
     setMode();
   }
-  if (!(live && scan)) {
+  if (!(live && (scan || mapped))) {
     classModeChosen = false;
     el('room-analysis').hidden = true;
   }
@@ -227,10 +233,12 @@ const trackingText = { normal: 'Tracking', limited: 'Tracking limited', not_avai
 let coverageRevision = -1, classModeChosen = false, planPoints;
 function showRoomAnalysis(force = false) {
   const sample = displayedSample;
-  if (el('room-analysis').hidden || !sample?.lidar || !force && planPoints === sample.points) return;
+  if (el('room-analysis').hidden || !(sample?.lidar || sample?.mapper) || !force && planPoints === sample.points) return;
   planPoints = sample.points;
-  const analysis = savedMap ? classifyRoom(sample.points, { hits: sample.hits }) : lidar.analyse();
-  const { path, simulated } = sample.lidar;
+  const analysis = sample.mapper && !sample.lidar ? mapper.analysis
+    : savedMap ? classifyRoom(sample.points, { hits: sample.hits }) : lidar.analyse();
+  // The mapper does not send the scanner path on this channel, so none is drawn.
+  const { path, simulated } = sample.lidar ?? { path: [], simulated: false };
   const lastGap = path.lastIndexOf(null);
   // The plan renderer draws one polyline; avoid joining across missing poses.
   drawRoomPlan(el('room-plan'), analysis, { path: path.slice(lastGap + 1), simulated });
@@ -239,7 +247,7 @@ function showRoomAnalysis(force = false) {
     `${name} ${Math.round(analysis.counts[i + 1] / total * 100)}%`).join(' · ') +
     ` of ${numbers.format(analysis.labels.length)} points` + (lastGap >= 0 ? ' · Path since last gap' : ''));
 }
-for (const id of ['lidar-analyse', 'replay-analyse']) {
+for (const id of ['lidar-analyse', 'replay-analyse', 'mapper-analyse']) {
   el(id).addEventListener('click', () => {
     el('room-analysis').hidden = !el('room-analysis').hidden;
     showRoomAnalysis(true);
@@ -383,9 +391,10 @@ el('connection-form').addEventListener('submit', event => {
   try {
     let firstFrame = true;
     lidar.reset();
+    mapper.reset();
     showLidarPause();
     disconnect = openFeed(address.value.trim(), {
-      decode: feedMode.value === 'lidar' ? decodeLidar : decodeSocketFrame,
+      decode: feedMode.value === 'lidar' ? decodeLidar : decodeSonarOrMapper,
       onStatus: status,
       onInvalid: () => { note.textContent = 'Message skipped. Unsupported or malformed frame.'; },
       onFrame: frame => {
@@ -415,7 +424,12 @@ el('connection-form').addEventListener('submit', event => {
         updateModeAvailability();
         if (!savedMap) showScanSource();
         if (latest.lidar) showLidarStatus(latest.lidar);
-        else note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
+        else if (latest.mapper) {
+          const m = latest.mapper;
+          note.textContent = `${numbers.format(m.mapPoints)} map points · ${m.objects} object${m.objects === 1 ? '' : 's'} · ` +
+            `floor seen ${m.floorArea.toFixed(1)} m²` + (m.roomHeight === null ? '' : ` · ceiling ${m.roomHeight.toFixed(2)} m`);
+          showRoomAnalysis();
+        } else note.textContent = latest.sonar ? latest.sonar.detectionCount === null ? 'Detections unavailable.'
           : `${latest.sonar.detectionCount} model detections.` : 'Receiving preview frames.';
       },
     });
@@ -526,7 +540,8 @@ function render(time) {
     target: latestTarget?.confidence >= 0.5 ? latestTarget : null,
     points: live ? livePoints ?? emptyPoints : demoPoints, colors: liveColors, hits: liveHits,
     frame: latest.frame, latencyMs: latest.latencyMs,
-    sonar: latest.sonar, lidar: latest.lidar, captureTime: latest.captureTime, snr: latest.snr };
+    sonar: latest.sonar, lidar: latest.lidar, mapper: live ? latest.mapper : undefined,
+    captureTime: latest.captureTime, snr: latest.snr };
   if (!activeSample.lidar?.paused && (!activeSample.lidar || history.at(-1)?.frame !== activeSample.frame) &&
       (!sonarReplayComplete || history.at(-1)?.frame !== activeSample.frame) &&
       (activeSample.points.length || history.length)) sampleHistory(history, activeSample);
@@ -593,7 +608,7 @@ function render(time) {
     const vertexCount = mode.value === 'mesh' && viewer.hasMesh ? viewer.meshCount : viewer.count;
     set('vertices', numbers.format(Math.min(vertexCount, pointLimit)));
     set('frame', sample.frame ?? '—');
-    set('signal-label', sample.lidar ? 'Tracking' : sample.sonar ? 'Mean SNR' : 'Latency');
+    set('signal-label', sample.lidar ? 'Tracking' : sample.mapper ? 'Mean hits per cell' : sample.sonar ? 'Mean SNR' : 'Latency');
     set('latency', sample.lidar ? trackingText[sample.lidar.tracking] ?? '—'
       : sample.sonar ? sample.snr == null ? '—' : `${sample.snr.toFixed(1)}×`
       : sample.latencyMs === undefined ? '—' : `${Math.round(sample.latencyMs)} ms`);

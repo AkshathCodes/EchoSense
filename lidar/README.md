@@ -64,8 +64,21 @@ path. The EchoSense viewer below is capped at 20,000 points, so it shows a thinn
 node serve.js          # from the repo root; open http://127.0.0.1:4173/
 ```
 
-Connect the viewer to `ws://127.0.0.1:8765/ws` (its default). You see the
-accumulated map plus the current frame.
+In the viewer set **Sensor feed** to **Sonar / Preview**, keep the address
+`ws://127.0.0.1:8765/ws`, and click **Connect**. You see the accumulated map
+plus the current frame.
+
+The viewer recognises these frames (`meta.kind: "lidar_map"`) through
+`src/mapper-adapter.js`: map points are coloured as floor, wall, ceiling or
+object, the live frame is drawn in orange-red, and **Room analysis** draws a
+labelled floor plan with each object's height. The classifier is geometric
+rules, tested on simulated rooms only. Add `--viewer-points 50000` to `serve`,
+`replay --serve` or `sim --serve` to send a denser map (the adapter accepts
+up to 60,000 points; the default stays at 20,000). `scripts/run-lidar.sh
+--mapper` from the repo root does all of this in one command.
+
+The team's `websocket-bridge --lidar` also uses port 8765. Run one or the
+other, or give the mapper `--viewer-port 8766` and type that address in.
 
 ## Send scans to Databricks
 

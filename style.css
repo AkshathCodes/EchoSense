@@ -231,3 +231,8 @@ dialog form > div { display: flex; justify-content: flex-end; gap: 7px; }
 .room-analysis-bar span { flex: 1; }
 .room-analysis-bar a, .room-analysis-bar button { padding: 5px 10px; font-size: 11px; text-decoration: none; }
 @media (max-width: 760px) { .room-analysis { inset: 56px 8px 46px 8px; } }
+
+/* Tools shown while the Mac LiDAR mapper is the source */
+.mapper-tools { display: flex; align-items: center; gap: 10px; margin-top: 7px; font-size: 11px; }
+.mapper-tools button { padding: 4px 7px; font-size: 11px; }
+.mapper-tools a { color: var(--blue); }

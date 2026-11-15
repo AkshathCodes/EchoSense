@@ -1,37 +1,58 @@
 # EchoSense
 
-ECHO RESCUE is a spatial memory system for simulated search-and-rescue
-planning. An operator scans an unfamiliar indoor space with an iPhone Pro's
-LiDAR. ECHO keeps what was observed, records where the scanner went, and shows
-which areas have no measurement.
+ECHO RESCUE maps an indoor space with an iPhone Pro's LiDAR, without relying
+on visible light, and keeps what it saw. It builds a 3D map as the operator
+moves, sorts it into floor, walls and objects, and draws a floor plan that
+marks what was never observed. The use case is simulated search-and-rescue
+planning.
 
-It does not see through walls, detect people behind obstacles, or make a
-phone an operational firefighting device. Unobserved never means safe.
+It does not see through walls or smoke, detect people behind obstacles, or
+make a phone an operational firefighting device. Not observed never means safe.
 
 ```
-iPhone Pro LiDAR -> ARKit app (ios-lidar/) -> Wi-Fi -> Python bridge (websocket-bridge/)
-  -> 3D viewer (src/) -> spatial memory, coverage map, audio cues
+iPhone Pro LiDAR + motion sensors      Mac mapper (lidar/mapper)        Viewer (src/)
+capture app (lidar/ios)            ->  position from depth + IMU    ->  surface classes,
+no camera images used                  dense voxel map, recording       room analysis, floor plan
 ```
+
+This is the path that has run on a real phone
+([log](sonar-ml/docs/log/2026-11-14-iphone-lidar-pivot.md)). Full darkness
+has not been tested yet.
 
 ## Quick start
 
-Needs Node 20+, Python 3.11+ (macOS ships 3.9: `brew install python@3.12`),
-and for a real scan an iPhone Pro with the app from `ios-lidar/`.
+Needs Node 20+ and Python 3.11+ (macOS ships 3.9: `brew install python@3.12`).
+A real scan also needs an iPhone Pro with the capture app from `lidar/ios/`
+([build steps](lidar/README.md)).
 
-On macOS or Linux, one command sets up the bridge and starts everything:
+On macOS or Linux, one command sets up and starts the mapper and the viewer:
 
 ```sh
-scripts/run-lidar.sh                 # viewer + live bridge, records to recordings/
-scripts/run-lidar.sh --fake          # same, plus the SYNTHETIC phone (no iPhone needed)
-scripts/run-lidar.sh --replay recordings/<file>.jsonl
+scripts/run-lidar.sh --mapper                  # live: phone streams to the mapper, session recorded
+scripts/run-lidar.sh --mapper-sim              # no phone: the mapper's SIMULATED room
+scripts/run-lidar.sh --mapper-replay lidar/mapper/recordings/<file>.esd
 ```
 
-Then open `http://127.0.0.1:4173/` and click **Connect**. On Windows, or to
-run the pieces by hand, see [LiDAR spatial memory](#lidar-spatial-memory).
+Open `http://127.0.0.1:4173/`, set **Sensor feed** to **Sonar / Preview**
+(address `ws://127.0.0.1:8765/ws`), and click **Connect**. The badge reads
+**LiDAR map**, points are coloured by surface class, and **Room analysis**
+draws the floor plan. **Open dense map** shows the mapper's full-density view.
 
-With no bridge at all, `node serve.js` shows the viewer on built-in mock data.
+With nothing running, `node serve.js` shows the viewer on built-in mock data.
 
-## LiDAR spatial memory
+### Two LiDAR paths, one port
+
+| Path | Phone app | Laptop | Viewer feed | State |
+|---|---|---|---|---|
+| **Mapper (demo)** | `lidar/ios/` | `lidar/mapper/` | Sonar / Preview, `/ws` | Run on a real phone |
+| Bridge (fallback) | `ios-lidar/` | `websocket-bridge/ --lidar` | iPhone LiDAR, `/lidar/view` | App never compiled; synthetic frames only |
+
+Both serve the viewer on port 8765, so run one at a time. The bridge path adds
+a coverage map, scanner path and audio cues that the mapper path does not
+feed yet. `scripts/run-lidar.sh` with no argument, `--fake` or `--replay`
+starts the bridge path.
+
+## Bridge path: LiDAR spatial memory
 
 ```sh
 node serve.js
@@ -156,7 +177,8 @@ tab keeps receiving socket messages while a saved map is open.
 ## Verify
 
 ```sh
-node --test                                  # viewer, spatial memory, classifier
+node --test                                         # viewer, adapter, spatial memory, classifier
+cd lidar/mapper && .venv/bin/python -m pytest       # mapper
 cd websocket-bridge && .venv/bin/python -m pytest   # bridge
 ```
 
@@ -175,10 +197,11 @@ replacement, telemetry, invalid message handling and disconnect recovery.
 
 | Path | What | Owner |
 |---|---|---|
-| `ios-lidar/` | iPhone ARKit app that publishes LiDAR frames | Rishi |
+| `lidar/` | **Demo path.** iPhone capture app, Mac mapper, dense viewer, Databricks export | Rishi |
+| `ios-lidar/` | Fallback ARKit app for the bridge path, never compiled | Ryan |
 | `websocket-bridge/` | Python bridge, [LiDAR protocol](websocket-bridge/LIDAR_PROTOCOL.md), record and replay | Charvik |
 | `index.html`, `style.css`, `serve.js`, `src/` | Web viewer and LiDAR rendering | Akshath |
-| `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js` | Spatial memory, room classification, floor plan, audio cues | Ryan |
+| `src/mapper-adapter.js`, `src/spatial-memory.js`, `src/room-classifier.js`, `src/room-plan.js`, `src/audio-cues.js` | Mapper adapter, spatial memory, room classification, floor plan, audio cues | Ryan |
 | `test/` | Viewer tests, including the scan simulator | viewer and Ryan |
 | `docs/` | [Demo plan](docs/DEMO.md) | Ryan |
 | `scripts/` | Setup and run helpers | shared |

@@ -1,6 +1,8 @@
-# ECHO LiDAR publisher (iPhone app)
+# ECHO LiDAR publisher (iPhone app, fallback)
 
-Owner: Rishi. Reads the iPhone's LiDAR depth map through ARKit, converts it to
+**The demo uses the capture app in [`lidar/ios/`](../lidar/README.md), which has
+run on a real phone. This app is a fallback for the `lidar_frame` v1 bridge and
+has never been compiled.** Owner: Ryan. Reads the iPhone's LiDAR depth map through ARKit, converts it to
 world-space points, and publishes `lidar_frame` v1 messages to the bridge
 ([protocol](../websocket-bridge/LIDAR_PROTOCOL.md)). It also shows the depth
 map on screen with the distance to the nearest obstacle.

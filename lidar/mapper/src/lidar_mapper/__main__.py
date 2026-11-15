@@ -28,6 +28,9 @@ def _common(p) -> None:
                    help="imu_icp = dark-safe (default); arkit = camera-based reference, lights on only")
     p.add_argument("--view", choices=["map", "frame", "both"], default="both")
     p.add_argument("--viewer-port", type=int, default=8765)
+    p.add_argument("--viewer-points", type=int, default=20000,
+                   help="points sent to the EchoSense viewer per update (default 20000; the viewer's "
+                        "mapper adapter accepts up to 60000, the plain sonar decoder only 20000)")
     p.add_argument("--ply", help="write the final map to this .ply file")
 
 
@@ -60,6 +63,10 @@ def main(argv=None) -> None:
                    help="also copy to this Databricks volume folder, e.g. /Volumes/workspace/<schema>/landing/lidar")
     e.add_argument("--profile", help="Databricks CLI profile for --upload")
     a = ap.parse_args(argv)
+    if getattr(a, "viewer_points", 20000) != 20000:
+        # Opt-in: the default stays at the tested 20,000.
+        from . import server as _server
+        _server.MAX_VIEWER_POINTS = max(5000, min(60000, a.viewer_points))
 
     if a.cmd == "export":
         from .export import export_session, upload
