@@ -30,6 +30,7 @@ contracts in [`docs/interfaces/`](docs/interfaces/).
 | [`firmware/`](firmware/) | Microcontroller code: chirp TX, mic capture, streaming | hardware / embedded |
 | [`../`](../) (repo root: `index.html`, `src/`) | EchoSense web scan viewer: the demo UI | frontend |
 | [`../acoustic/`](../acoustic/) | Audible-chirp laptop scanner + Databricks aggregation | Ryan |
+| [`databricks/`](databricks/README.md) + `databricks.yml` | Databricks Asset Bundle: lakehouse tables, pipeline, MLflow, jobs | software / ML |
 | [`data/`](data/) | Local datasets (git-ignored contents) | everyone |
 
 ## Start here

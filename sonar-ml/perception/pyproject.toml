@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=64"]  # >=64 for editable installs (Databricks pipeline env)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -17,6 +17,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 torch = ["torch>=2.1"]
+# Lakehouse adapters + Databricks job code (sonar-ml/databricks/, ADR-0014). Databricks runtimes already have these.
+lakehouse = ["pandas>=2", "pyarrow>=14"]
+# Only to run the local Spark smoke test (tests/test_lakehouse_spark.py); needs Java 17+.
+spark = ["pyspark>=3.5", "pandas>=2", "pyarrow>=14"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

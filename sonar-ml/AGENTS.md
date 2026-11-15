@@ -17,6 +17,10 @@ standalone `madhacks-sonar` repo on 2026-11-14; history before that lives in
 **Run every command in this file from `sonar-ml/`.** The venv is
 `sonar-ml/.venv`; data goes in `sonar-ml/data/` (git-ignored).
 
+**Databricks:** `databricks.yml` + [`databricks/`](databricks/README.md) deploy the
+same pipeline as a bundle (tables, Lakeflow pipeline, MLflow, UC model). Keep
+per-frame logic in `sonar_perception.lakehouse`, not in job or pipeline files.
+
 ## 1. What this project is (30 seconds)
 
 Firefighters lose visibility in smoke. Thermal cameras help but have blind
@@ -90,6 +94,8 @@ is stubbed, and what is next. Update it when you finish something.
 | `inference.py` | Load RF or torch classifier (optionally cost-biased, e.g. `person=2`); `run_detect` over any source |
 | `diagnostics.py` | Follow every ground-truth object of a class end to end: invisible / merged / misclassified / correct, by pose and range |
 | `viz.py` | Matplotlib 3D viewer |
+| `lakehouse.py` | Databricks adapters: frame/cluster/detection rows, Spark DDL schemas, `mapInPandas` partition functions, `train_forest` (ADR-0014) |
+| `lakehouse_model.py` | MLflow pyfunc wrapper for the classifier (bias built in) |
 | `__main__.py` | CLI: `generate`, `baseline`, `train`, `compare`, `detect`, `diagnose`, `view` |
 
 ## 6. Environment and commands

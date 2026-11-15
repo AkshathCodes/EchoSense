@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EchoSense Live Map</title>
+<style>
+  :root { --bg: #07090c; --panel: rgba(14, 18, 24, 0.86); --text: #d7dee8; --muted: #8592a3; --accent: #5cc8ff; --warn: #ffb454; --bad: #ff6b6b; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #c { position: fixed; inset: 0; }
+  .panel { position: fixed; top: 12px; left: 12px; background: var(--panel); border: 1px solid #1f2733; border-radius: 10px; padding: 10px 12px; min-width: 230px; backdrop-filter: blur(6px); }
+  .panel h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; letter-spacing: .2px; }
+  .row { display: flex; justify-content: space-between; gap: 16px; }
+  .row span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .status-tracking { color: var(--accent) !important; }
+  .status-lost { color: var(--bad) !important; }
+  .status-other { color: var(--warn) !important; }
+  .controls { margin-top: 8px; display: grid; gap: 6px; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); }
+  input[type=range] { width: 110px; }
+  button { background: #16202b; color: var(--text); border: 1px solid #2a3646; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+  .hint { position: fixed; bottom: 10px; left: 12px; color: var(--muted); font-size: 12px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel">
+  <h1>EchoSense live map</h1>
+  <div class="row"><span>Connection</span><span id="conn">connecting</span></div>
+  <div class="row"><span>Tracking</span><span id="status">-</span></div>
+  <div class="row"><span>Map points shown</span><span id="npts">0</span></div>
+  <div class="row"><span>Map voxels</span><span id="nvox">0</span></div>
+  <div class="row"><span>Valid depth</span><span id="valid">-</span></div>
+  <div class="row"><span>Phone position</span><span id="pos">-</span></div>
+  <div class="controls">
+    <label>Point size <input id="size" type="range" min="1" max="8" step="0.5" value="2"></label>
+    <label>Hide ceiling above <input id="ceil" type="range" min="0" max="100" step="1" value="80"></label>
+    <label>Live frame <input id="showFrame" type="checkbox" checked></label>
+    <label>Follow phone <input id="follow" type="checkbox"></label>
+    <button id="reset">Reset view</button>
+  </div>
+</div>
+<div class="hint">Drag to orbit · right-drag to pan · scroll to zoom · colour = height</div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07090c);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.05, 200);
+camera.up.set(0, 0, 1);  // map frame is z-up
+camera.position.set(-4, -6, 5);
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 0, -0.5);
+controls.update();
+
+const grid = new THREE.GridHelper(20, 20, 0x1d2633, 0x131a23);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+
+function cloud(color, size) {
+  const g = new THREE.BufferGeometry();
+  const m = new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: color === null, color: color ?? 0xffffff });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false;
+  scene.add(p);
+  return p;
+}
+const mapPts = cloud(null, 2);
+const framePts = cloud(0xffb454, 2);
+const trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff6b6b }));
+trail.frustumCulled = false;
+scene.add(trail);
+const phone = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff6b6b }));
+scene.add(phone);
+
+let zmin = 0, zmax = 1, lastMap = null, fitted = false, lastVoxels = 0;
+function fitView(xyz) {
+  // frame the map from above at an angle (robust bounds: 2nd-98th percentile)
+  const n = xyz.length / 3; if (n < 100) return;
+  const step = Math.max(1, Math.floor(n / 20000)), cols = [[], [], []];
+  for (let i = 0; i < n; i += step) for (let c = 0; c < 3; c++) cols[c].push(xyz[i * 3 + c]);
+  const q = (a, f) => { a.sort((x, y) => x - y); return a[Math.floor(f * (a.length - 1))]; };
+  const lo = cols.map(a => q(a, 0.02)), hi = cols.map(a => q(a, 0.98));
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, cz = lo[2];
+  const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], 2);
+  controls.target.set(cx, cy, cz);
+  camera.position.set(cx - span * 0.3, cy - span * 0.9, cz + span * 1.1);
+  controls.update(); fitted = true;
+}
+const ramp = [[0.27, 0.0, 0.33], [0.23, 0.32, 0.55], [0.13, 0.57, 0.55], [0.37, 0.79, 0.38], [0.99, 0.91, 0.14]];
+function heightColor(t, out, i) {
+  t = Math.min(1, Math.max(0, t)) * (ramp.length - 1);
+  const k = Math.min(ramp.length - 2, Math.floor(t)), f = t - k;
+  for (let c = 0; c < 3; c++) out[i + c] = ramp[k][c] * (1 - f) + ramp[k + 1][c] * f;
+}
+
+function setMap(xyz) {
+  lastMap = xyz;
+  const n = xyz.length / 3;
+  if (!n) return;
+  const zs = new Float32Array(n);
+  for (let i = 0; i < n; i++) zs[i] = xyz[i * 3 + 2];
+  const sorted = Float32Array.from(zs).sort();
+  zmin = sorted[Math.floor(n * 0.02)]; zmax = sorted[Math.floor(n * 0.98)];
+  const ceilPct = +document.getElementById("ceil").value / 100;
+  const zcut = zmin + (zmax - zmin) * ceilPct + (ceilPct >= 1 ? 1e9 : 0);
+  const keep = [];
+  for (let i = 0; i < n; i++) if (zs[i] <= zcut) keep.push(i);
+  const pos = new Float32Array(keep.length * 3), col = new Float32Array(keep.length * 3);
+  keep.forEach((idx, j) => {
+    pos[j * 3] = xyz[idx * 3]; pos[j * 3 + 1] = xyz[idx * 3 + 1]; pos[j * 3 + 2] = xyz[idx * 3 + 2];
+    heightColor((zs[idx] - zmin) / Math.max(zmax - zmin, 1e-3), col, j * 3);
+  });
+  mapPts.geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  mapPts.geometry.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  document.getElementById("npts").textContent = keep.length.toLocaleString();
+}
+
+function onMessage(buf) {
+  const dv = new DataView(buf);
+  const hlen = dv.getUint32(0, true);
+  const hdr = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hlen)));
+  let off = 4 + hlen;
+  off += (4 - (off % 4)) % 4;
+  const take = n => { const a = new Float32Array(buf, off, n * 3); off += n * 12; return a; };
+  const map = hdr.n_map >= 0 ? take(hdr.n_map) : null;
+  const frame = take(hdr.n_frame);
+  const tr = take(hdr.n_traj);
+  if (hdr.voxels < lastVoxels * 0.5) fitted = false;  // map restarted (new segment): re-frame it
+  lastVoxels = hdr.voxels ?? 0;
+  if (map) { setMap(map); if (!fitted) fitView(map); }
+  framePts.geometry.setAttribute("position", new THREE.BufferAttribute(frame, 3));
+  framePts.visible = document.getElementById("showFrame").checked;
+  trail.geometry.setAttribute("position", new THREE.BufferAttribute(tr, 3));
+  if (hdr.pose) {
+    phone.position.set(...hdr.pose);
+    if (document.getElementById("follow").checked) {
+      const d = new THREE.Vector3().subVectors(camera.position, controls.target);
+      controls.target.set(...hdr.pose); camera.position.copy(controls.target).add(d);
+    }
+    document.getElementById("pos").textContent = hdr.pose.map(v => v.toFixed(2)).join(", ") + " m";
+  }
+  const st = document.getElementById("status");
+  st.textContent = hdr.status ?? "-";
+  st.className = hdr.status === "tracking" ? "status-tracking" : hdr.status === "lost" ? "status-lost" : "status-other";
+  document.getElementById("nvox").textContent = (hdr.voxels ?? 0).toLocaleString();
+  document.getElementById("valid").textContent = hdr.valid == null ? "-" : Math.round(hdr.valid * 100) + "%";
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/map`);
+  ws.binaryType = "arraybuffer";
+  const conn = document.getElementById("conn");
+  ws.onopen = () => { conn.textContent = "connected"; };
+  ws.onmessage = e => onMessage(e.data);
+  ws.onclose = () => { conn.textContent = "reconnecting"; setTimeout(connect, 1000); };
+}
+connect();
+
+document.getElementById("size").oninput = e => { mapPts.material.size = framePts.material.size = +e.target.value; };
+document.getElementById("ceil").oninput = () => lastMap && setMap(lastMap);
+document.getElementById("reset").onclick = () => { if (lastMap) fitView(lastMap); };
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
