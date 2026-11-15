@@ -1,0 +1,64 @@
+{
+  "class_order": [
+    "wall",
+    "doorway",
+    "furniture",
+    "debris",
+    "person",
+    "noise"
+  ],
+  "data": {
+    "baseline": {
+      "train": {
+        "observed_scenes": 311,
+        "clusters": 1323,
+        "class_counts": [
+          383,
+          112,
+          353,
+          171,
+          197,
+          107
+        ]
+      },
+      "validation": {
+        "observed_scenes": 78,
+        "clusters": 402,
+        "class_counts": [
+          111,
+          29,
+          100,
+          44,
+          75,
+          43
+        ]
+      }
+    },
+    "candidate": {
+      "train": {
+        "observed_scenes": 310,
+        "clusters": 1232,
+        "class_counts": [
+          336,
+          110,
+          325,
+          165,
+          182,
+          114
+        ]
+      },
+      "validation": {
+        "observed_scenes": 78,
+        "clusters": 378,
+        "class_counts": [
+          97,
+          28,
+          88,
+          48,
+          69,
+          48
+        ]
+      }
+    }
+  }
+}
