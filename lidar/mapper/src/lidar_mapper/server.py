@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import struct
 import threading
 import time
@@ -54,10 +55,16 @@ class LiveMapper:
     """Keeps only the newest phone frame (no queue), maps it, and serves snapshots to viewers."""
 
     def __init__(self, mapper: Mapper, view: str = "both", record: str | None = None, verbose: bool = True,
-                 delivery: str = "live"):
+                 delivery: str = "live", capture_stall_s: float = 3.0):
         if delivery not in ("live", "simulated", "recorded"):
             raise ValueError("Unknown mapper delivery mode")
         self.delivery = delivery
+        if not math.isfinite(capture_stall_s) or capture_stall_s <= 0:
+            raise ValueError("capture_stall_s must be finite and positive")
+        self.capture_stall_s = capture_stall_s
+        self.last_ingested_at: float | None = None  # Host monotonic seconds, never phone timestamps.
+        self.phone_connections = 0
+        self.capture_complete = False
         self._acquisitions: set[str] = set()
         self.mapper = mapper
         self.view = view
@@ -79,6 +86,8 @@ class LiveMapper:
     # ---------------------------------------------------------------- phone side
     async def phone_handler(self, conn) -> None:
         peer = conn.remote_address
+        with self.lock:
+            self.phone_connections += 1
         print(f"[phone] connected {peer}")
         try:
             async for msg in conn:
@@ -93,6 +102,9 @@ class LiveMapper:
                 self.event.set()
         except ConnectionClosed:
             pass
+        finally:
+            with self.lock:
+                self.phone_connections -= 1
         print(f"[phone] disconnected {peer}")
 
     def ingest(self, msg: bytes):
@@ -115,7 +127,31 @@ class LiveMapper:
                                    seq=f.seq)
             self.last = (f, r)
             self.mapped += 1
+            self.last_ingested_at = time.monotonic()
+            self.capture_complete = False
         return f, r
+
+    def finish_capture(self) -> None:
+        """Finite sim/replay is complete; keep serving its final historical map."""
+        with self.lock:
+            self.capture_complete = True
+
+    def _capture_status(self) -> dict:
+        # Called under the snapshot lock. Sending a snapshot never refreshes ingestion.
+        age = None if self.last_ingested_at is None else max(0.0, time.monotonic() - self.last_ingested_at)
+        mode = "replay" if self.delivery == "recorded" else (
+            "simulated" if self.acquisition_source == "simulated" else
+            "live" if self.acquisition_source == "live" else "unknown")
+        if self.capture_complete and self.delivery != "live":
+            state = "complete"
+        elif self.delivery == "live" and not self.phone_connections:
+            state = "disconnected"
+        elif age is None:
+            state = "waiting"
+        else:
+            state = "stalled" if age > self.capture_stall_s else "active"
+        return {"mode": mode, "state": state, "age_s": None if age is None else round(age, 3),
+                "stall_after_s": self.capture_stall_s}
 
     @property
     def acquisition_source(self) -> str:
@@ -175,7 +211,8 @@ class LiveMapper:
                 rows += [[round(float(x), 3), round(float(y), 3), round(float(z), 3), 100.0] for x, y, z in fp]
             acquisition = self.acquisition_source
             meta = {"format_version": "0.2", "source": acquisition, "sensor_id": "iphone-lidar",
-                    "tilt_deg": 0.0, "kind": "lidar_map", "view": self.view}
+                    "tilt_deg": 0.0, "kind": "lidar_map", "view": self.view,
+                    "capture": self._capture_status()}
             if self.sonar is not None:
                 # Sonar-only surfaces go last so they survive the point cap, which trims map points first.
                 extra = [[round(float(x), 3), round(float(y), 3), round(float(z), 3), SONAR_STRENGTH]

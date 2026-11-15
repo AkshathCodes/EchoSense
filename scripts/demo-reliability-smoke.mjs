@@ -257,6 +257,10 @@ try {
   await connect();
   await waitUntil(async () => frames > previousFrames + 2 && !/historical/.test(await page.locator('#source').innerText()), 'new connection replaces history');
   check('reconnect resumes new simulated session', /Simulated/.test(await page.locator('#source').innerText()));
+  await waitUntil(() => lastFrame.frame.meta.capture?.state === 'complete', 'finite simulation complete');
+  await waitUntil(async () => /historical/.test(await page.locator('#source').innerText()), 'simulation final map historical');
+  check('finite simulation completion is historical, never phone capture', lastFrame.frame.meta.capture.mode === 'simulated'
+    && await page.locator('#source').getAttribute('data-live') === null);
   await page.locator('#connect').evaluate(button => button.click());
   check('explicit disconnect retains map', /historical/.test(await page.locator('#source').innerText()));
   await stop(mapper);
@@ -294,6 +298,9 @@ for name,source in [('synthetic','sim'),('unknown','legacy-unknown'),('real-head
     check(`${name} replay PNG attribution`, texts.some(t => /replay/.test(t)) && (name === 'synthetic'
       ? texts.includes('SIMULATED DATA') : (name !== 'unknown' || texts.some(t => /original acquisition unknown/.test(t))) && !texts.includes('SIMULATED DATA')));
     if (name === 'unknown') await savedSnapshot('unknown', /original acquisition unknown/);
+    await waitUntil(() => lastFrame.frame.meta.capture?.state === 'complete', 'finite replay complete');
+    check(`${name} completed replay remains replay`, lastFrame.frame.meta.capture.mode === 'replay'
+      && await page.locator('#source').getAttribute('data-live') === null);
     await disconnectCheck(`${name} replay loss`);
   }
   console.log('Testing live binary delivery of synthetic acquisition and delayed worker results.');
@@ -327,6 +334,65 @@ for name,source in [('synthetic','sim'),('unknown','legacy-unknown'),('real-head
   await waitUntil(() => { if (fakePhone.launchError) throw fakePhone.launchError; return fakePhone.exitCode !== null; }, 'synthetic publisher complete');
   check('synthetic binary publisher completed', fakePhone.exitCode === 0 && /sent 40 frames/.test(fakePhone.logs));
   await disconnectCheck('binary simulation loss');
+  console.log('Testing connected capture pause/resume with SYNTHETIC bytes and a phone-source header.');
+  await startMapper(['serve', '--capture-stall-seconds', '1']);
+  await connect();
+  const controlled = launch(python, ['-u', '-B', '-c', `
+import asyncio, sys
+from pathlib import Path
+from dataclasses import replace
+from websockets.asyncio.client import connect
+from lidar_mapper.sim import stream
+from lidar_mapper.protocol import encode
+async def run():
+    root=Path(sys.argv[1]); frames=list(stream(12)); i=0
+    async with connect('ws://127.0.0.1:8770/depth') as ws:
+        while not (root/'pause-capture').exists():
+            f=frames[min(i,len(frames)-1)]
+            await ws.send(encode(replace(f,seq=i,t=i*.25,source='lidar'))); i+=1
+            await asyncio.sleep(.25)
+        print('PAUSED with phone socket OPEN',flush=True)
+        while not (root/'resume-capture').exists(): await asyncio.sleep(.05)
+        print('RESUMED synthetic frames',flush=True)
+        while not (root/'close-capture').exists():
+            f=frames[min(i,len(frames)-1)]
+            await ws.send(encode(replace(f,seq=i,t=i*.25,source='lidar'))); i+=1
+            await asyncio.sleep(.25)
+    print('CLOSED synthetic publisher',flush=True)
+asyncio.run(run())
+`, artifacts]);
+  await waitUntil(async () => lastFrame.frame.meta.capture?.mode === 'live' && lastFrame.frame.meta.capture.state === 'active'
+    && await page.locator('#source').getAttribute('data-live') !== null, 'phone-header active (synthetic fixture)');
+  check('continuous successful ingestion active', /receiving depth/.test(await page.locator('#connection-note').innerText()));
+  // Allow a map to accumulate before pausing the socket that remains connected.
+  await waitUntil(() => lastFrame.frame.points.filter(row => row[3] < 100).length > 100, 'fixture map accumulated');
+  await writeFile(join(artifacts, 'pause-capture'), '', { flag: 'wx' });
+  await waitUntil(() => controlled.logs.includes('PAUSED'), 'publisher paused without disconnect');
+  const beforeStallSequence = lastFrame.sequence;
+  await waitUntil(async () => lastFrame.frame.meta.capture?.state === 'stalled'
+    && /capture stalled/.test(await page.locator('#source').innerText()), 'stall despite continuing mapper snapshots');
+  const stalledText = await planText();
+  check('snapshot stream does not imply current capture', lastFrame.sequence > beforeStallSequence
+    && /Mapper connected/.test(await page.locator('#connection-state').innerText()));
+  check('stalled map and trained analysis retained as historical', /historical/.test(await page.locator('#source').innerText())
+    && stalledText.some(t => /LiDAR surface forest v1/.test(t)) && stalledText.some(t => /capture stalled/.test(t)));
+  check('stall clears live indicator and current sonar readout', await page.locator('#source').getAttribute('data-live') === null
+    && /not current/.test(await page.locator('#sonar-readout').innerText()));
+  await page.screenshot({ path: join(artifacts, 'capture-stalled.png') });
+  await writeFile(join(artifacts, 'resume-capture'), '', { flag: 'wx' });
+  await waitUntil(async () => lastFrame.frame.meta.capture?.state === 'active'
+    && !/historical/.test(await page.locator('#source').innerText()) && await page.locator('#source').getAttribute('data-live') !== null,
+  'fresh depth resumes capture on existing sockets');
+  check('fresh frames resume without reconnect', /Mapper connected/.test(await page.locator('#connection-state').innerText())
+    && /receiving depth/.test(await page.locator('#connection-note').innerText()));
+  await writeFile(join(artifacts, 'close-capture'), '', { flag: 'wx' });
+  await waitUntil(() => controlled.exitCode !== null, 'controlled publisher closed');
+  if (controlled.exitCode !== 0) throw new Error(controlled.logs);
+  await waitUntil(async () => lastFrame.frame.meta.capture?.state === 'disconnected'
+    && /historical/.test(await page.locator('#source').innerText()), 'phone socket loss while mapper stays connected');
+  check('phone disconnect distinct from mapper disconnect', /Mapper connected/.test(await page.locator('#connection-state').innerText())
+    && await page.locator('#connect').innerText() === 'Disconnect');
+  await disconnectCheck('capture mapper loss');
   results.workers = workers;
   results.browserErrors = errors;
   check('no browser errors', errors.length === 0);
