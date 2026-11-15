@@ -48,44 +48,52 @@ This assumes a **Seeed Studio XIAO** (ESP32C3, ESP32S3, RP2040, SAMD21 or
 nRF52840). All of them use 3.3 V pins, so the Echo divider is still needed.
 A 5 V Seeeduino wires like the Arduino table further down instead.
 
-The XIAO pads used, as printed on the board or its pinout card:
+Team build: XIAO nRF52840 on a 3 x 7 cm perfboard, sensor soldered to the
+same board just below it. Hold the board with the USB-C socket at the top and
+the XIAO's label facing you. Pads from the USB end: left side D0, D1, D2, D3,
+D4, D5, D6; right side 5V, GND, 3V3, D10, D9, D8, D7.
 
-| HC-SR04 | XIAO pad | Notes |
+| HC-SR04 | XIAO pad | How |
 |---|---|---|
-| VCC | **5V** (also labelled VBUS or VUSB) | 5 V from the USB cable. Not the 3V3 pad |
-| GND | **GND** | |
-| Trig | **D1** | Direct wire |
-| Echo | **D2**, through the divider | Never direct |
+| Vcc | **5V**, right side, 1st pad | Jumper, about 4 cm, up the right edge |
+| Gnd | **GND**, right side, 2nd pad | Jumper, about 5 cm. Run it on the back of the board |
+| Trig | **D6**, left side, 7th (last) pad | Short jumper or a clipped resistor leg |
+| Echo | **D5**, left side, 6th pad, through 1 kΩ | The resistor is the connection |
+| | D5 to sensor Gnd pin through 2 kΩ | The resistor is the connection |
 
-What to solder:
+Never wire Echo straight to a pad: the sensor drives it at 5 V.
 
-1. **Four wires onto the HC-SR04 pins**, 40 to 50 cm, four colors. Cover each
-   joint with heat-shrink or tape.
-2. **VCC wire to the XIAO 5V pad. Trig wire to D1.**
-3. **The divider, in line on the Echo wire.** Solder the Echo wire to one leg
-   of the 1 kΩ resistor. Twist the other leg of the 1 kΩ together with one
-   leg of the 2 kΩ and a short wire, and solder that three-way joint. The
-   short wire goes to **D2**. The free leg of the 2 kΩ goes to **GND**.
-4. **GND.** The sensor's GND wire and the 2 kΩ leg both go to the XIAO GND
-   pad. Twist them together first and solder one joint.
-5. Slide heat-shrink over the resistors, or wrap them in tape, so bare legs
-   cannot touch each other or the XIAO.
+Placing the sensor: lay it on the perfboard below the XIAO with the two cans
+facing up and its four pins pointing toward the XIAO. Read left to right, the
+pins are then Gnd, Echo, Trig, Vcc. Bend the last 3 mm of each pin down and
+push them into four neighbouring holes in a free row one or two rows below
+the XIAO, then solder. The sensor overhangs the board by a few millimeters on
+each side. Stick its body down with foam tape or hot glue. With the board
+flat against the back of the phone, the cans now face the same way as the
+rear cameras.
 
-Tips for a board this small: tin the pad and the wire separately, then touch
-them together with the iron for a second. Use thin wire. Do not bridge 5V to
-GND, which sit near each other on the XIAO: that shorts the USB port. If you
-have header pins and female jumpers, solder headers to the XIAO instead and
-push the wires on; it is easier to fix.
+Order of work:
 
-No 1 kΩ and 2 kΩ? See the substitutes in the ESP32 section below.
+1. Solder the four sensor pins into their holes.
+2. 1 kΩ: one leg to the Echo pin's hole, the other leg to D5.
+3. 2 kΩ: one leg to D5 (same joint), the other leg to the sensor Gnd pin.
+4. Trig pin to D6 with a clipped leg or a short piece of wire.
+5. Vcc pin to the 5V pad. Keep this jumper off the other right-side pads.
+6. Gnd pin to the GND pad, with the jumper on the back of the board, taped
+   down, clear of the two rows of XIAO pad holes except where it lands.
+7. Multimeter: 5V to GND must not beep. Echo pin to D5 about 1 kΩ. D5 to GND
+   about 2 kΩ.
+
+Bare wire is acceptable only where it cannot touch another joint. Anything
+insulated is safer: strands from a spare USB or Ethernet cable work well.
 
 Flash it: in the Arduino IDE add Seeed's board package for your XIAO model,
 select the board and port, open `hcsr04.ino`, Upload. If the port does not
 appear, hold the tiny **B** (boot) button while plugging in USB. Open the
 Serial Monitor at 115200. The first line names the pins the sketch chose,
-for example `# hcsr04 trig pin 3 echo pin 4` (the numbers are the chip's own
-pin numbers for D1 and D2). If every reading is `timeout`, uncomment
-`#define SEEED_XIAO` at the top of the sketch and upload again. On a Mac the
+then readings. If that first line says `trig pin 9 echo pin 10`, the sketch
+did not recognise the board: uncomment `#define SEEED_XIAO` at the top and
+upload again. On a Mac the
 XIAO shows up as `/dev/cu.usbmodemXXXX`.
 
 ## ESP32 dev board build, step by step

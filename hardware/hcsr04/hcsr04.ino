@@ -18,9 +18,11 @@
 #if defined(SEEED_XIAO) || defined(ARDUINO_XIAO_ESP32C3) || defined(ARDUINO_XIAO_ESP32S3) || \
     defined(ARDUINO_XIAO_ESP32C6) || defined(ARDUINO_SEEED_XIAO_RP2040) || \
     defined(ARDUINO_SEEED_XIAO_M0) || defined(ARDUINO_Seeed_XIAO_nRF52840)
-// XIAO pads D1 and D2. XIAO pins are 3.3 V, so ECHO needs the 1k / 2k divider.
-const uint8_t TRIG_PIN = D1;
-const uint8_t ECHO_PIN = D2;
+// XIAO pads D6 (Trig) and D5 (Echo): the two pads nearest the sensor when it
+// sits below the XIAO on the perfboard, so no long wires are needed.
+// XIAO pins are 3.3 V, so ECHO needs the 1k / 2k divider.
+const uint8_t TRIG_PIN = D6;
+const uint8_t ECHO_PIN = D5;
 #elif defined(ESP32)
 // Classic ESP32 DevKit. ECHO must come through the 1k / 2k divider: the sensor
 // drives it at 5 V and ESP32 pins take 3.3 V at most.
