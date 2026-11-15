@@ -1,6 +1,7 @@
 # EchoSense
 
-An interactive room scan viewer for the EchoSense headset project. The UI
+EchoSense maps a room you cannot see. An iPhone's LiDAR scanner is the live
+sensor and this interactive viewer shows the scan. The UI
 starts with **Mock data**, a modeled living room and simulated sensor readings.
 
 > **Sensor change (Nov 14):** the sonar hardware is no longer available. The

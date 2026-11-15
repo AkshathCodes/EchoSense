@@ -2,6 +2,16 @@
 
 _Last updated 2026-11-14 (session 5: moved into the EchoSense monorepo as `sonar-ml/`). Update this file whenever something starts or stops working._
 
+## Sensor change (2026-11-14, evening)
+
+The sonar hardware is no longer available for MadHacks. The live sensor for
+the demo is an iPhone LiDAR app ([`ios/`](../../ios/README.md)) that streams
+points through `websocket-bridge --lidar` in this package's X forward / Y left
+/ Z up frame. Nothing in `sonar-ml/` changed: it still runs on simulated sonar
+only, and its classifier has **not** been run on LiDAR points (LiDAR frames
+carry `detections: null`). The intensity column of a LiDAR frame is ARKit depth
+confidence (0 to 2), not SNR.
+
 ## Summary
 
 **No hardware yet.** Perception runs end to end on simulated data:
