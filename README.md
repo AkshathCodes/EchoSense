@@ -141,9 +141,11 @@ is listed as an object until more of it is seen, the bottom 10 cm of walls
 and furniture is labeled floor, and anything taller than 1.2 m (a person, a
 door, a cabinet) is labeled wall. It has not been scored on a real scan.
 
-Not verified: the iPhone app has never been compiled, and no real LiDAR frame
-has passed through this pipeline. Everything above was exercised with
-synthetic frames only.
+Bridge-path verification: the fallback app in `ios-lidar/` has never been
+compiled, and no real LiDAR frame has passed through the bridge pipeline.
+The bridge features and simulation results in this section were exercised
+with synthetic frames only. The separate demo mapper path in `lidar/` has
+run on a real phone, as described at the top of this README.
 
 ## Viewer controls
 
